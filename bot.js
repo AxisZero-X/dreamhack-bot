@@ -151,11 +151,18 @@ async function solveQuiz(page, cursor) {
     // 현재 문제의 보기 수집 (현재 보이는 질문의 보기만)
     const choiceCount = await page.evaluate((sel, currentSel) => {
       // 1. 현재 활성화된 스텝(문제) 컨테이너를 찾는다.
+      // 퀴즈 페이지의 경우 is-current가 없을 수도 있으므로 step.is-accessible 중 마지막 항목 등을 확인하거나 전체에서 offsetParent가 있는걸 찾습니다.
       const currentStep = document.querySelector(currentSel);
-      if (!currentStep) return 0;
 
-      // 2. 해당 스텝 내부의 보기만 추출
-      const visible = [...currentStep.querySelectorAll(sel)].filter(el => el.offsetParent !== null);
+      let choices;
+      if (currentStep) {
+        choices = [...currentStep.querySelectorAll(sel)];
+      } else {
+        // currentSel로 못 찾은 경우 화면에 보이는 모든 보기 중 첫 번째 질문에 속한 것만 가져옴
+        choices = [...document.querySelectorAll(sel)];
+      }
+
+      const visible = choices.filter(el => el.offsetParent !== null);
       return visible.length;
     }, SELECTORS.QUIZ_CHOICE, SELECTORS.QUIZ_STEP_CURRENT);
     console.log(`  🔘 보기 ${choiceCount}개 발견`);
@@ -173,8 +180,8 @@ async function solveQuiz(page, cursor) {
       // 현재 보이는 보기만 가져와서 클릭
       const visibleChoices = await page.evaluateHandle((sel, currentSel) => {
         const currentStep = document.querySelector(currentSel);
-        if (!currentStep) return [];
-        return [...currentStep.querySelectorAll(sel)].filter(el => el.offsetParent !== null);
+        let choices = currentStep ? [...currentStep.querySelectorAll(sel)] : [...document.querySelectorAll(sel)];
+        return choices.filter(el => el.offsetParent !== null);
       }, SELECTORS.QUIZ_CHOICE, SELECTORS.QUIZ_STEP_CURRENT);
       const choiceHandle = await visibleChoices.evaluateHandle((arr, idx) => arr[idx], c);
       if (!choiceHandle) break;
