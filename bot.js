@@ -143,10 +143,15 @@ async function solveQuiz(page, cursor) {
     await randomDelay(DELAY.QUIZ_READ_MIN, DELAY.QUIZ_READ_MAX);
 
     // 현재 문제의 보기 수집 (현재 보이는 질문의 보기만)
-    const choiceCount = await page.evaluate((sel) => {
-      const visible = [...document.querySelectorAll(sel)].filter(el => el.offsetParent !== null);
+    const choiceCount = await page.evaluate((sel, currentSel) => {
+      // 1. 현재 활성화된 스텝(문제) 컨테이너를 찾는다.
+      const currentStep = document.querySelector(currentSel);
+      if (!currentStep) return 0;
+
+      // 2. 해당 스텝 내부의 보기만 추출
+      const visible = [...currentStep.querySelectorAll(sel)].filter(el => el.offsetParent !== null);
       return visible.length;
-    }, SELECTORS.QUIZ_CHOICE);
+    }, SELECTORS.QUIZ_CHOICE, SELECTORS.QUIZ_STEP_CURRENT);
     console.log(`  🔘 보기 ${choiceCount}개 발견`);
 
     if (choiceCount === 0) {
@@ -160,9 +165,11 @@ async function solveQuiz(page, cursor) {
       console.log(`  🔄 [보기 ${c + 1}/${choiceCount}] 선택 중...`);
 
       // 현재 보이는 보기만 가져와서 클릭
-      const visibleChoices = await page.evaluateHandle((sel) => {
-        return [...document.querySelectorAll(sel)].filter(el => el.offsetParent !== null);
-      }, SELECTORS.QUIZ_CHOICE);
+      const visibleChoices = await page.evaluateHandle((sel, currentSel) => {
+        const currentStep = document.querySelector(currentSel);
+        if (!currentStep) return [];
+        return [...currentStep.querySelectorAll(sel)].filter(el => el.offsetParent !== null);
+      }, SELECTORS.QUIZ_CHOICE, SELECTORS.QUIZ_STEP_CURRENT);
       const choiceHandle = await visibleChoices.evaluateHandle((arr, idx) => arr[idx], c);
       if (!choiceHandle) break;
       await cursor.click(choiceHandle);
@@ -248,19 +255,26 @@ async function clickNextStep(page, cursor, nextIndex) {
  */
 async function clickCompleteButton(page, cursor) {
   try {
-    // 버튼이 나타날 때까지 최대 10초 대기
+    // 버튼이 나타날 때까지 최대 5초 대기
     await page.waitForFunction((sel) => {
       const btns = document.querySelectorAll(sel);
       return Array.from(btns).some(btn => btn.innerText.includes('진행하기') || btn.innerText.includes('다음 주제로'));
     }, { timeout: 5000 }, SELECTORS.COMPLETE_BTN).catch(() => {});
 
     const btnText = await page.evaluate((sel) => {
-      const btns = document.querySelectorAll(sel);
-      for (const btn of btns) {
-        if (btn.innerText.includes('진행하기') || btn.innerText.includes('다음 주제로')) {
-          btn.click();
-          return btn.innerText.trim();
-        }
+      const btns = Array.from(document.querySelectorAll(sel));
+
+      // '진행하기' 버튼을 우선적으로 찾음
+      let targetBtn = btns.find(btn => btn.innerText.includes('진행하기'));
+
+      // 없으면 '다음 주제로' 버튼 찾음
+      if (!targetBtn) {
+        targetBtn = btns.find(btn => btn.innerText.includes('다음 주제로'));
+      }
+
+      if (targetBtn) {
+        targetBtn.click();
+        return targetBtn.innerText.trim();
       }
       return null;
     }, SELECTORS.COMPLETE_BTN);
