@@ -55,8 +55,7 @@ const { launchBrowser, randomDelay, randomScroll } = require('./utils');
       const isQuiz = await detectQuiz(page);
 
       if (isQuiz) {
-        // === 퀴즈 처리 ===
-        await solveQuizBruteForce(page, cursor);
+        await solveQuiz(page, cursor);
       } else {
         // === 일반 강의 처리 ===
         console.log('📖 강의 내용 읽는 중... (스크롤 + 체류)');
@@ -65,7 +64,6 @@ const { launchBrowser, randomDelay, randomScroll } = require('./utils');
           randomScroll(page),
         ]);
 
-        // 수강 완료 버튼이 있으면 클릭
         await clickCompleteButton(page, cursor);
       }
 
@@ -101,77 +99,122 @@ async function detectQuiz(page) {
 }
 
 /**
- * 퀴즈 브루트포스 풀이 (객관식)
- * 보기를 하나씩 선택 → 제출 → 오답이면 다음 보기
+ * 퀴즈 풀이 (멀티스텝 브루트포스)
+ * 각 스텝(문제)마다: 보기 하나씩 선택 → 확인 → 정답이면 다음 스텝
  */
-async function solveQuizBruteForce(page, cursor) {
-  // 문제 읽는 시간
-  await randomDelay(DELAY.QUIZ_READ_MIN, DELAY.QUIZ_READ_MAX);
+async function solveQuiz(page, cursor) {
+  const quizTitle = await page.$eval(SELECTORS.QUIZ_TITLE, el => el.innerText.trim()).catch(() => '(추출 실패)');
+  console.log(`📝 퀴즈: "${quizTitle}"`);
 
-  // 문제 텍스트 추출 (로깅용)
-  const questionText = await page.$eval(SELECTORS.QUIZ_TITLE, el => el.innerText.trim()).catch(() => '(추출 실패)');
-  console.log(`📝 문제: "${questionText}"`);
+  // 총 스텝 수 확인
+  const totalSteps = await page.$$eval(SELECTORS.QUIZ_STEP, steps => steps.length);
+  console.log(`📋 총 ${totalSteps}개 문제`);
 
-  // 모든 라디오 버튼(보기) 수집
-  const radioInputs = await page.$$(SELECTORS.RADIO_INPUT);
-  console.log(`🔘 보기 ${radioInputs.length}개 발견`);
+  for (let step = 0; step < totalSteps; step++) {
+    console.log(`\n  --- 문제 ${step + 1}/${totalSteps} ---`);
 
-  if (radioInputs.length === 0) {
-    console.log('⚠️  라디오 버튼을 찾지 못함. 셀렉터를 확인하세요.');
-    return;
-  }
-
-  for (let i = 0; i < radioInputs.length; i++) {
-    console.log(`\n  🔄 [보기 ${i + 1}/${radioInputs.length}] 선택 중...`);
-
-    // 보기 클릭 (ghost-cursor)
-    await cursor.click(radioInputs[i]);
-    await randomDelay(1000, 2000);
-
-    // 제출 버튼 클릭
-    try {
-      await page.waitForSelector(SELECTORS.SUBMIT_BTN, { timeout: 3000 });
-      await cursor.click(SELECTORS.SUBMIT_BTN);
-      console.log('  📤 제출 완료');
-    } catch {
-      console.log('  ⚠️  제출 버튼 없음. 셀렉터를 확인하세요.');
-      return;
+    // 현재 스텝이 이미 완료되었는지 확인
+    const stepCompleted = await isCurrentStepCompleted(page);
+    if (stepCompleted) {
+      console.log('  ⏭️  이미 완료된 문제, 다음으로 이동');
+      await clickNextStep(page, cursor, step + 1);
+      continue;
     }
 
-    // 결과 확인
-    await randomDelay(1500, 3000);
+    // 문제 읽는 시간
+    await randomDelay(DELAY.QUIZ_READ_MIN, DELAY.QUIZ_READ_MAX);
 
-    const isCorrect = await checkAnswer(page);
+    // 현재 문제의 보기 수집
+    const choices = await page.$$(SELECTORS.QUIZ_CHOICE);
+    console.log(`  🔘 보기 ${choices.length}개 발견`);
 
-    if (isCorrect) {
-      console.log('  🎉 정답!');
-      return;
+    if (choices.length === 0) {
+      console.log('  ⚠️  보기를 찾지 못함. 셀렉터를 확인하세요.');
+      break;
     }
 
-    console.log('  ❌ 오답. 다음 보기 시도...');
-    await randomDelay(DELAY.QUIZ_RETRY_MIN, DELAY.QUIZ_RETRY_MAX);
+    // 브루트포스: 각 보기 시도
+    let solved = false;
+    for (let c = 0; c < choices.length; c++) {
+      console.log(`  🔄 [보기 ${c + 1}/${choices.length}] 선택 중...`);
+
+      // 보기 클릭
+      const currentChoices = await page.$$(SELECTORS.QUIZ_CHOICE);
+      if (!currentChoices[c]) break;
+      await cursor.click(currentChoices[c]);
+      await randomDelay(800, 1500);
+
+      // 확인 버튼 대기 (disabled 해제될 때까지)
+      try {
+        await page.waitForFunction(
+          (sel, disSel) => {
+            const btn = document.querySelector(sel);
+            return btn && !btn.classList.contains('disabled');
+          },
+          { timeout: 3000 },
+          SELECTORS.QUIZ_SUBMIT_BTN,
+          SELECTORS.QUIZ_SUBMIT_DISABLED,
+        );
+      } catch {
+        console.log('  ⚠️  확인 버튼이 활성화되지 않음');
+        continue;
+      }
+
+      // 확인 버튼 클릭
+      const submitBtn = await page.$(SELECTORS.QUIZ_SUBMIT_BTN + ':not(.disabled)');
+      if (submitBtn) {
+        await cursor.click(submitBtn);
+        console.log('  📤 확인 클릭');
+      }
+
+      await randomDelay(1500, 3000);
+
+      // 정답 여부 확인: 현재 스텝에 check-icon이 생겼는지
+      const correct = await isCurrentStepCompleted(page);
+
+      if (correct) {
+        console.log('  🎉 정답!');
+        solved = true;
+        break;
+      }
+
+      console.log('  ❌ 오답. 다음 보기 시도...');
+      await randomDelay(DELAY.QUIZ_RETRY_MIN, DELAY.QUIZ_RETRY_MAX);
+    }
+
+    if (!solved) {
+      console.log('  ⚠️  모든 보기를 시도했으나 정답을 찾지 못함.');
+    }
+
+    // 다음 스텝으로 이동
+    if (step < totalSteps - 1) {
+      await clickNextStep(page, cursor, step + 1);
+      await randomDelay(1000, 2000);
+    }
   }
 
-  console.log('⚠️  모든 보기를 시도했으나 정답을 찾지 못함.');
+  console.log('  📝 퀴즈 풀이 완료');
 }
 
 /**
- * 정답/오답 결과 확인
+ * 현재 스텝이 완료되었는지 확인
  */
-async function checkAnswer(page) {
-  try {
-    // 정답 피드백 요소가 있으면 정답
-    const correct = await page.$(SELECTORS.CORRECT_FEEDBACK);
-    if (correct) return true;
+async function isCurrentStepCompleted(page) {
+  return page.evaluate((currentSel, completedSel) => {
+    const currentStep = document.querySelector(currentSel);
+    if (!currentStep) return false;
+    return currentStep.querySelector(completedSel) !== null;
+  }, SELECTORS.QUIZ_STEP_CURRENT, SELECTORS.QUIZ_STEP_COMPLETED);
+}
 
-    // 오답 피드백 요소가 있으면 오답
-    const wrong = await page.$(SELECTORS.WRONG_FEEDBACK);
-    if (wrong) return false;
-
-    // 둘 다 없으면 페이지 변화로 판단 (다음 페이지로 넘어갔으면 정답)
-    return false;
-  } catch {
-    return false;
+/**
+ * 다음 스텝(문제) 클릭
+ */
+async function clickNextStep(page, cursor, nextIndex) {
+  const steps = await page.$$(SELECTORS.QUIZ_STEP);
+  if (steps[nextIndex]) {
+    await cursor.click(steps[nextIndex]);
+    await randomDelay(500, 1000);
   }
 }
 

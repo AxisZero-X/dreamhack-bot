@@ -1,10 +1,10 @@
 // --- 사용자 환경 설정 ---
 const CHROME_PATH = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const USER_DATA_DIR = '/Users/yoseop/Library/Application Support/Google/Chrome';
-const PROFILE_NAME = 'Profile 1';
+const PROFILE_NAME = 'Default';
 
 // --- 타겟 설정 ---
-const CURRICULUM_URL = 'https://dreamhack.io/lecture/courses/1'; // 수강할 코스 커리큘럼 URL
+const CURRICULUM_URL = 'https://dreamhack.io/euser/curriculums/916'; // 수강할 코스 커리큘럼 URL
 
 // --- 딜레이 설정 (밀리초) ---
 const DELAY = {
@@ -22,23 +22,27 @@ const DELAY = {
   QUIZ_RETRY_MAX: 5000,            // 오답 후 재시도 대기 최대 (5초)
 };
 
-// --- CSS 셀렉터 (드림핵 사이트 구조에 맞게 수정 필요) ---
+// --- CSS 셀렉터 ---
 const SELECTORS = {
-  // 커리큘럼 페이지
-  LECTURE_ITEM: '.lecture-list-item',
-  INCOMPLETE_INDICATOR: '.status-incomplete',
-  LECTURE_LINK: 'a',
+  // 커리큘럼 페이지 (dreamhack.io/euser/curriculums/*)
+  LECTURE_ITEM: '.entity',
+  INCOMPLETE_INDICATOR: '.action-text:not(.completed)',
+  LECTURE_LINK: '.entity-body a',
 
-  // 강의 페이지
-  COMPLETE_BTN: '.complete-button-class',
+  // 강의 페이지 (learn.dreamhack.io/*)
+  COMPLETE_BTN: '.complete-button-class', // TODO: 일반 강의 페이지 확인 후 매핑
 
-  // 퀴즈 페이지
+  // 퀴즈 페이지 (learn.dreamhack.io/quiz/*)
   QUIZ_TITLE: '.quiz-title',
-  RADIO_INPUT: 'input[type="radio"]',
-  RADIO_LABEL: 'label',
-  SUBMIT_BTN: '.submit-quiz-btn',
-  CORRECT_FEEDBACK: '.correct-feedback',
-  WRONG_FEEDBACK: '.wrong-feedback',
+  QUIZ_STEP: '.step',
+  QUIZ_STEP_CURRENT: '.step.is-current',
+  QUIZ_STEP_ACCESSIBLE: '.step.is-accessible',
+  QUIZ_STEP_COMPLETED: '.check-icon',
+  QUIZ_QUESTION: '.quiz-question',
+  QUIZ_CHOICE: '.choice',
+  QUIZ_CHOICE_ACTIVE: '.choice.is-active',
+  QUIZ_SUBMIT_BTN: '.btn.btn-primary',
+  QUIZ_SUBMIT_DISABLED: '.btn.btn-primary.disabled',
 };
 
 module.exports = {
