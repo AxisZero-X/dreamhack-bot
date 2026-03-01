@@ -52,6 +52,12 @@ const { launchBrowser, ensureLoggedIn, randomDelay, randomScroll } = require('./
       const url = lectureUrls[i];
       console.log(`\n▶️  [${i + 1}/${lectureUrls.length}] ${url}`);
 
+      // 자동화 불가능한 페이지(예: 워게임 챌린지) 스킵
+      if (url.includes('wargame/challenges')) {
+        console.log('⚠️  워게임 챌린지 페이지가 감지되었습니다. 자동화를 스킵합니다.');
+        continue;
+      }
+
       await page.goto(url, { waitUntil: 'networkidle2' });
 
       // 퀴즈 페이지인지 확인
