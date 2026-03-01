@@ -101,6 +101,42 @@ const { launchBrowser, ensureLoggedIn, randomDelay, randomScroll } = require('./
     }
 
     console.log('\n🎉 모든 강의 순회 완료!');
+
+    // === 3단계: 최종 완료 검증 ===
+    console.log(`\n🔍 최종 검증을 위해 커리큘럼 페이지 접속: ${CURRICULUM_URL}`);
+    await page.goto(CURRICULUM_URL, { waitUntil: 'networkidle2' });
+    await randomDelay(2000, 5000);
+
+    const remainingUrls = await page.evaluate(
+      (itemSel, incompleteSel, linkSel) => {
+        const urls = [];
+        const items = document.querySelectorAll(itemSel);
+        items.forEach(item => {
+          const isIncomplete = item.querySelector(incompleteSel) !== null;
+          if (isIncomplete) {
+            const linkEl = item.querySelector(linkSel);
+            if (linkEl && linkEl.href) {
+              urls.push(linkEl.href);
+            }
+          }
+        });
+        return urls;
+      },
+      SELECTORS.LECTURE_ITEM,
+      SELECTORS.INCOMPLETE_INDICATOR,
+      SELECTORS.LECTURE_LINK,
+    );
+
+    if (remainingUrls.length === 0) {
+      console.log('✅ 완벽합니다! 모든 강의와 퀴즈가 성공적으로 수료 처리되었습니다.');
+    } else {
+      console.log(`⚠️ 검증 결과, 아직 미완료 처리된 항목이 ${remainingUrls.length}개 남아있습니다.`);
+      remainingUrls.forEach((url, idx) => {
+        console.log(`  - [${idx + 1}] ${url}`);
+      });
+      console.log('재실행을 통해 남은 항목들을 마저 수료할 수 있습니다.');
+    }
+
   } catch (error) {
     console.error('❌ 에러 발생:', error);
   } finally {
