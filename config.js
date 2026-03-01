@@ -1,25 +1,24 @@
 // --- 사용자 환경 설정 ---
 const CHROME_PATH = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const USER_DATA_DIR = '/Users/yoseop/Library/Application Support/Google/Chrome';
-const PROFILE_NAME = 'Default';
 
 // --- 타겟 설정 ---
 const CURRICULUM_URL = 'https://dreamhack.io/euser/curriculums/916'; // 수강할 코스 커리큘럼 URL
 
 // --- 딜레이 설정 (밀리초) ---
+const IS_TEST = process.env.TEST_MODE === '1';
 const DELAY = {
-  PAGE_STAY_MIN: 3 * 60 * 1000,   // 강의 페이지 최소 체류 (3분)
-  PAGE_STAY_MAX: 7 * 60 * 1000,   // 강의 페이지 최대 체류 (7분)
-  BETWEEN_LECTURES_MIN: 5000,      // 강의 간 이동 최소 대기 (5초)
-  BETWEEN_LECTURES_MAX: 15000,     // 강의 간 이동 최대 대기 (15초)
-  SCROLL_PAUSE_MIN: 3000,          // 스크롤 간 최소 대기 (3초)
-  SCROLL_PAUSE_MAX: 10000,         // 스크롤 간 최대 대기 (10초)
-  TYPE_CHAR_MIN: 50,               // 타이핑 글자당 최소 (ms)
-  TYPE_CHAR_MAX: 200,              // 타이핑 글자당 최대 (ms)
-  QUIZ_READ_MIN: 5000,             // 퀴즈 읽기 최소 (5초)
-  QUIZ_READ_MAX: 15000,            // 퀴즈 읽기 최대 (15초)
-  QUIZ_RETRY_MIN: 2000,            // 오답 후 재시도 대기 최소 (2초)
-  QUIZ_RETRY_MAX: 5000,            // 오답 후 재시도 대기 최대 (5초)
+  PAGE_STAY_MIN: IS_TEST ? 3000 : 3 * 60 * 1000,
+  PAGE_STAY_MAX: IS_TEST ? 5000 : 7 * 60 * 1000,
+  BETWEEN_LECTURES_MIN: IS_TEST ? 1000 : 5000,
+  BETWEEN_LECTURES_MAX: IS_TEST ? 2000 : 15000,
+  SCROLL_PAUSE_MIN: IS_TEST ? 500 : 3000,
+  SCROLL_PAUSE_MAX: IS_TEST ? 1000 : 10000,
+  TYPE_CHAR_MIN: 50,
+  TYPE_CHAR_MAX: 200,
+  QUIZ_READ_MIN: IS_TEST ? 1000 : 5000,
+  QUIZ_READ_MAX: IS_TEST ? 2000 : 15000,
+  QUIZ_RETRY_MIN: IS_TEST ? 500 : 2000,
+  QUIZ_RETRY_MAX: IS_TEST ? 1000 : 5000,
 };
 
 // --- CSS 셀렉터 ---
@@ -30,7 +29,9 @@ const SELECTORS = {
   LECTURE_LINK: '.entity-body a',
 
   // 강의 페이지 (learn.dreamhack.io/*)
-  COMPLETE_BTN: '.complete-button-class', // TODO: 일반 강의 페이지 확인 후 매핑
+  COMPLETE_BTN: 'button.btn.btn-primary', // "진행하기" 또는 "다음 주제로" 버튼
+  POPUP_HEADER: '.popup-header',          // "축하합니다!" 팝업 헤더
+  SLOT_WRAPPER: '.slot-wrapper',          // "커리큘럼으로" 또는 "다음 목표로" 버튼을 감싸는 div
 
   // 퀴즈 페이지 (learn.dreamhack.io/quiz/*)
   QUIZ_TITLE: '.quiz-title',
@@ -47,8 +48,6 @@ const SELECTORS = {
 
 module.exports = {
   CHROME_PATH,
-  USER_DATA_DIR,
-  PROFILE_NAME,
   CURRICULUM_URL,
   DELAY,
   SELECTORS,

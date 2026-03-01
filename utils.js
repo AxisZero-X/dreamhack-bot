@@ -1,41 +1,40 @@
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const { CHROME_PATH, USER_DATA_DIR, PROFILE_NAME, DELAY } = require('./config');
+const { CHROME_PATH, DELAY } = require('./config');
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
 puppeteer.use(StealthPlugin());
 
-const TMP_PROFILE = '/tmp/dreamhack_chrome_profile';
+// 봇 전용 프로필 (세션 유지됨, 재실행 시 재로그인 불필요)
+const BOT_PROFILE = path.join(__dirname, '.chrome-profile');
 
 /**
- * Chrome 프로필 복사 후 디버깅 모드로 실행, puppeteer 연결
+ * Chrome을 봇 전용 프로필 + 디버깅 모드로 실행, puppeteer 연결
  */
 async function launchBrowser() {
   // 1. 기존 Chrome 정리
   try { execSync('pkill -9 -f "Google Chrome" 2>/dev/null'); } catch {}
   await sleep(2000);
 
-  // 2. 프로필 복사 (원본 잠금 우회, 쿠키는 Keychain으로 복호화 가능)
-  console.log('🔄 Chrome 프로필 복사 중...');
-  execSync(`rm -rf "${TMP_PROFILE}"`);
-  execSync(`rsync -a --exclude='SingletonLock' --exclude='SingletonCookie' --exclude='SingletonSocket' --exclude='LOCK' --exclude='crashpad' --exclude='BrowserMetrics' "${USER_DATA_DIR}/" "${TMP_PROFILE}/"`);
+  // 봇 프로필 디렉토리 생성
+  if (!fs.existsSync(BOT_PROFILE)) {
+    fs.mkdirSync(BOT_PROFILE, { recursive: true });
+  }
 
-  // 3. Chrome 디버깅 모드 실행
+  // 2. Chrome 실행
   console.log('🌐 Chrome 실행 중...');
   const chrome = spawn(CHROME_PATH, [
-    `--user-data-dir=${TMP_PROFILE}`,
-    `--profile-directory=${PROFILE_NAME}`,
+    `--user-data-dir=${BOT_PROFILE}`,
     '--remote-debugging-port=9222',
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-blink-features=AutomationControlled',
     '--no-sandbox',
-    '--disable-gpu',
   ], { stdio: ['ignore', 'ignore', 'pipe'] });
 
-  // 4. stderr에서 WS endpoint 추출
+  // 3. stderr에서 WS endpoint 추출
   const wsUrl = await new Promise((resolve, reject) => {
     let stderr = '';
     const timeout = setTimeout(() => {
@@ -59,21 +58,72 @@ async function launchBrowser() {
 
   console.log('🔗 Chrome 연결 성공');
 
-  // 5. puppeteer 연결
+  // 4. puppeteer 연결
   const browser = await puppeteer.connect({
     browserWSEndpoint: wsUrl,
     defaultViewport: null,
   });
 
-  // cleanup 등록
+  // cleanup 등록 (프로필은 유지 - 세션 보존)
   const cleanup = () => {
     try { chrome.kill('SIGTERM'); } catch {}
-    try { execSync(`rm -rf "${TMP_PROFILE}" 2>/dev/null`); } catch {}
   };
   process.on('exit', cleanup);
   process.on('SIGINT', () => { cleanup(); process.exit(); });
 
   return browser;
+}
+
+/**
+ * 로그인 상태 확인 + 미로그인 시 대기
+ */
+async function ensureLoggedIn(page) {
+  await page.goto('https://dreamhack.io', { waitUntil: 'networkidle2' });
+
+  const isLoggedIn = await page.evaluate(() => {
+    // 로그인 시 user-icon에 사용자 이름 텍스트가 있음
+    const icon = document.querySelector('.user-icon');
+    if (!icon) return false;
+    const text = icon.innerText?.trim();
+    return text.length > 0 && !text.includes('로그인');
+  });
+
+  if (isLoggedIn) {
+    console.log('🔑 로그인 상태 확인됨');
+    return;
+  }
+
+  // 로그인 페이지로 이동
+  console.log('\n⚠️  로그인이 필요합니다!');
+  console.log('📌 열린 Chrome 창에서 드림핵에 로그인해주세요.');
+  console.log('⏳ 로그인 완료 대기 중...\n');
+
+  await page.goto('https://dreamhack.io/users/login', { waitUntil: 'networkidle2' });
+
+  // 로그인 완료까지 폴링 (최대 5분)
+  for (let i = 0; i < 60; i++) {
+    await sleep(5000);
+    try {
+      // dreamhack.io로 돌아왔는지 확인
+      const url = page.url();
+      if (!url.includes('dreamhack.io')) continue;
+
+      const loggedIn = await page.evaluate(() => {
+        const icon = document.querySelector('.user-icon');
+        if (!icon) return false;
+        const text = icon.innerText?.trim();
+        return text.length > 0 && !text.includes('로그인');
+      });
+      if (loggedIn) {
+        console.log('🔑 로그인 완료!');
+        return;
+      }
+    } catch {
+      // 페이지 네비게이션 중일 수 있음
+    }
+  }
+
+  throw new Error('로그인 타임아웃 (5분)');
 }
 
 function sleep(ms) {
@@ -122,6 +172,7 @@ async function humanType(page, text) {
 
 module.exports = {
   launchBrowser,
+  ensureLoggedIn,
   randomDelay,
   randomScroll,
   humanType,

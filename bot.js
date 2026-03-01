@@ -1,6 +1,6 @@
 const { createCursor } = require('ghost-cursor');
 const { CURRICULUM_URL, DELAY, SELECTORS } = require('./config');
-const { launchBrowser, randomDelay, randomScroll } = require('./utils');
+const { launchBrowser, ensureLoggedIn, randomDelay, randomScroll } = require('./utils');
 
 (async () => {
   console.log('🚀 드림핵 자동 수강 봇 시작...\n');
@@ -10,6 +10,9 @@ const { launchBrowser, randomDelay, randomScroll } = require('./utils');
   const cursor = createCursor(page);
 
   try {
+    // === 0단계: 로그인 확인 ===
+    await ensureLoggedIn(page);
+
     // === 1단계: 커리큘럼 페이지에서 미완료 강의 목록 추출 ===
     console.log(`📚 커리큘럼 페이지 접속: ${CURRICULUM_URL}`);
     await page.goto(CURRICULUM_URL, { waitUntil: 'networkidle2' });
@@ -58,13 +61,28 @@ const { launchBrowser, randomDelay, randomScroll } = require('./utils');
         await solveQuiz(page, cursor);
       } else {
         // === 일반 강의 처리 ===
-        console.log('📖 강의 내용 읽는 중... (스크롤 + 체류)');
-        await Promise.all([
-          randomDelay(DELAY.PAGE_STAY_MIN, DELAY.PAGE_STAY_MAX),
-          randomScroll(page),
-        ]);
+        let lectureCompleted = false;
 
-        await clickCompleteButton(page, cursor);
+        while (!lectureCompleted) {
+          console.log('📖 강의 내용 읽는 중... (스크롤 + 체류)');
+          await Promise.all([
+            randomDelay(DELAY.PAGE_STAY_MIN, DELAY.PAGE_STAY_MAX),
+            randomScroll(page),
+          ]);
+
+          // 페이지 하단의 '진행하기' 혹은 '다음 주제로' 버튼 클릭 (이동이 발생할 수 있음)
+          await clickCompleteButton(page, cursor);
+
+          // 클릭 후 페이지가 변경/렌더링 될 시간을 대기
+          await randomDelay(2000, 4000);
+
+          // 팝업 검사 (축하합니다!)
+          lectureCompleted = await checkCompletionPopup(page, cursor);
+
+          if (!lectureCompleted) {
+            console.log('➡️ 다음 페이지로 넘어갔습니다. 계속 진행합니다.');
+          }
+        }
       }
 
       console.log(`✅ [${i + 1}] 완료`);
@@ -124,24 +142,31 @@ async function solveQuiz(page, cursor) {
     // 문제 읽는 시간
     await randomDelay(DELAY.QUIZ_READ_MIN, DELAY.QUIZ_READ_MAX);
 
-    // 현재 문제의 보기 수집
-    const choices = await page.$$(SELECTORS.QUIZ_CHOICE);
-    console.log(`  🔘 보기 ${choices.length}개 발견`);
+    // 현재 문제의 보기 수집 (현재 보이는 질문의 보기만)
+    const choiceCount = await page.evaluate((sel) => {
+      const visible = [...document.querySelectorAll(sel)].filter(el => el.offsetParent !== null);
+      return visible.length;
+    }, SELECTORS.QUIZ_CHOICE);
+    console.log(`  🔘 보기 ${choiceCount}개 발견`);
 
-    if (choices.length === 0) {
+    if (choiceCount === 0) {
       console.log('  ⚠️  보기를 찾지 못함. 셀렉터를 확인하세요.');
       break;
     }
 
     // 브루트포스: 각 보기 시도
     let solved = false;
-    for (let c = 0; c < choices.length; c++) {
-      console.log(`  🔄 [보기 ${c + 1}/${choices.length}] 선택 중...`);
+    for (let c = 0; c < choiceCount; c++) {
+      console.log(`  🔄 [보기 ${c + 1}/${choiceCount}] 선택 중...`);
 
-      // 보기 클릭
-      const currentChoices = await page.$$(SELECTORS.QUIZ_CHOICE);
-      if (!currentChoices[c]) break;
-      await cursor.click(currentChoices[c]);
+      // 현재 보이는 보기만 가져와서 클릭
+      const visibleChoices = await page.evaluateHandle((sel) => {
+        return [...document.querySelectorAll(sel)].filter(el => el.offsetParent !== null);
+      }, SELECTORS.QUIZ_CHOICE);
+      const choiceHandle = await visibleChoices.evaluateHandle((arr, idx) => arr[idx], c);
+      if (!choiceHandle) break;
+      await cursor.click(choiceHandle);
+      await visibleChoices.dispose();
       await randomDelay(800, 1500);
 
       // 확인 버튼 대기 (disabled 해제될 때까지)
@@ -223,11 +248,67 @@ async function clickNextStep(page, cursor, nextIndex) {
  */
 async function clickCompleteButton(page, cursor) {
   try {
-    await page.waitForSelector(SELECTORS.COMPLETE_BTN, { timeout: 3000 });
-    await cursor.click(SELECTORS.COMPLETE_BTN);
-    console.log('🖱️  수강 완료 버튼 클릭');
-    await randomDelay(1000, 3000);
-  } catch {
-    // 버튼 없으면 무시 (체류만으로 완료되는 경우)
+    // 버튼이 나타날 때까지 최대 10초 대기
+    await page.waitForFunction((sel) => {
+      const btns = document.querySelectorAll(sel);
+      return Array.from(btns).some(btn => btn.innerText.includes('진행하기') || btn.innerText.includes('다음 주제로'));
+    }, { timeout: 5000 }, SELECTORS.COMPLETE_BTN).catch(() => {});
+
+    const btnText = await page.evaluate((sel) => {
+      const btns = document.querySelectorAll(sel);
+      for (const btn of btns) {
+        if (btn.innerText.includes('진행하기') || btn.innerText.includes('다음 주제로')) {
+          btn.click();
+          return btn.innerText.trim();
+        }
+      }
+      return null;
+    }, SELECTORS.COMPLETE_BTN);
+
+    if (btnText) {
+      console.log(`🖱️  [${btnText}] 버튼 클릭 완료`);
+    } else {
+      console.log('⚠️  수강 완료 버튼("진행하기"/"다음 주제로")을 찾지 못했습니다.');
+    }
+  } catch (err) {
+    console.log('⚠️  버튼 대기 에러 (강의 종료 또는 다음 버튼 없음):', err.message);
+  }
+}
+
+/**
+ * 축하 팝업 확인 (커리큘럼으로 / 다음 목표로)
+ * 팝업이 뜨면 해당 버튼을 클릭하고 true를 반환. 안 뜨면 false.
+ */
+async function checkCompletionPopup(page, cursor) {
+  try {
+    // 팝업 헤더가 있는지 확인
+    const isPopupVisible = await page.evaluate((headerSel) => {
+      const header = document.querySelector(headerSel);
+      return header && header.innerText.includes('축하합니다');
+    }, SELECTORS.POPUP_HEADER);
+
+    if (isPopupVisible) {
+      console.log('🎉 축하합니다! 팝업 확인됨.');
+
+      // '커리큘럼으로' 혹은 '다음 목표로' 버튼 클릭
+      const btnText = await page.evaluate((sel) => {
+        const wrappers = document.querySelectorAll(sel);
+        for (const w of wrappers) {
+          if (w.innerText.includes('커리큘럼으로') || w.innerText.includes('다음 목표로')) {
+            w.click();
+            return w.innerText.trim();
+          }
+        }
+        return null;
+      }, SELECTORS.SLOT_WRAPPER);
+
+      if (btnText) {
+        console.log(`🖱️  팝업 내 [${btnText}] 버튼 클릭 완료`);
+      }
+      return true; // 강의 완전히 수료됨
+    }
+    return false; // 아직 팝업 안뜸, 계속 진행
+  } catch (err) {
+    return false;
   }
 }
