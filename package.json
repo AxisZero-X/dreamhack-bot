@@ -1,0 +1,15 @@
+{
+  "name": "dreamhack-bot",
+  "version": "1.0.0",
+  "description": "드림핵 자동 수강 봇",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "ghost-cursor": "^1.3.0",
+    "puppeteer-core": "^23.0.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}
