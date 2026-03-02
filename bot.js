@@ -345,23 +345,22 @@ async function solveQuiz(page, cursor) {
 
     // 텍스트 목록을 받아 해당 보기들을 클릭 후 결과 확인
     const tryChoiceTexts = async (texts) => {
-      // 현재 DOM에서 텍스트와 일치하는 보기 인덱스를 찾아 클릭
-      const clicked = await page.evaluate((idx, textList) => {
-        const q = document.querySelectorAll('.quiz-question')[idx];
-        if (!q) return false;
-        const choices = Array.from(q.querySelectorAll('.choice')).filter(el => el.offsetParent !== null);
-        for (const text of textList) {
-          const match = choices.find(el => el.innerText.trim() === text);
-          if (!match) return false;
-          match.scrollIntoView({ block: 'center' });
-          match.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
-          match.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
-          match.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-        }
-        return true;
-      }, qIndex, texts);
-      if (!clicked) return false;
-      await randomDelay(150, 250);
+      // elementHandle.click()으로 실제 클릭 이벤트 발생 (Vue 반응성 보장)
+      for (const text of texts) {
+        const handle = await page.evaluateHandle((idx, t) => {
+          const q = document.querySelectorAll('.quiz-question')[idx];
+          if (!q) return null;
+          const choices = Array.from(q.querySelectorAll('.choice')).filter(el => el.offsetParent !== null);
+          return choices.find(el => el.innerText.trim() === t) || null;
+        }, qIndex, text);
+        const el = handle.asElement();
+        if (!el) { handle.dispose(); return false; }
+        await el.scrollIntoView();
+        await el.click();
+        handle.dispose();
+        await randomDelay(100, 150);
+      }
+      await randomDelay(100, 150);
       // 확인 버튼 활성화 대기 후 클릭 (단일클릭 퀴즈는 바로 결과가 나오므로 timeout 무시)
       try {
         await page.waitForFunction(
@@ -431,13 +430,16 @@ async function solveQuiz(page, cursor) {
     };
 
     const clickRetry = async () => {
-      await page.evaluate((idx) => {
+      const handle = await page.evaluateHandle((idx) => {
         const q = document.querySelectorAll('.quiz-question')[idx];
-        if (!q) return;
+        if (!q) return null;
         const btn = q.querySelector('.btn.btn-primary');
-        if (btn && btn.innerText.includes('재도전')) { btn.scrollIntoView({ block: 'center' }); btn.click(); }
+        return (btn && btn.innerText.includes('재도전')) ? btn : null;
       }, qIndex);
-      await randomDelay(300, 500);
+      const el = handle.asElement();
+      if (el) { await el.scrollIntoView(); await el.click(); }
+      handle.dispose();
+      await randomDelay(400, 600);
     };
 
     const handleCorrect = async () => {
