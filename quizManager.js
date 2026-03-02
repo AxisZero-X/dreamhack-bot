@@ -126,8 +126,11 @@ async function solveQuiz(page, cursor) {
         break;
       }
 
-      logger.info('  ❌ 오답. 다음 보기 시도...');
+      logger.info('  ❌ 오답. 재도전 버튼 클릭 후 다음 보기 시도...');
       failedChoicesCache[step].add(c); // 오답 캐시에 추가
+
+      // 재도전 버튼 클릭 (오답 후 상태 초기화)
+      await clickRetryButton(page, cursor);
       await randomDelay(DELAY.QUIZ_RETRY_MIN, DELAY.QUIZ_RETRY_MAX);
     }
 
@@ -155,6 +158,25 @@ async function isCurrentStepCompleted(page) {
     SELECTORS.QUIZ_STEP_CURRENT,
     SELECTORS.QUIZ_STEP_COMPLETED,
   );
+}
+
+async function clickRetryButton(page, cursor) {
+  try {
+    const retryBtn = await page.evaluateHandle(() => {
+      const btns = [...document.querySelectorAll('.btn.btn-primary')];
+      return btns.find((btn) => btn.innerText.includes('재도전')) || null;
+    });
+    const element = retryBtn.asElement();
+    if (element) {
+      await cursor.click(element);
+      logger.info('  🔄 재도전 버튼 클릭');
+    } else {
+      logger.warn('  ⚠️  재도전 버튼을 찾지 못함');
+    }
+    retryBtn.dispose();
+  } catch (e) {
+    logger.warn(`  ⚠️  재도전 버튼 클릭 실패: ${e.message}`);
+  }
 }
 
 async function clickNextStep(page, cursor, nextIndex) {

@@ -46,6 +46,7 @@ const SELECTORS = {
   QUIZ_CHOICE_ACTIVE: '.choice.is-active',
   QUIZ_SUBMIT_BTN: '.btn.btn-primary',
   QUIZ_SUBMIT_DISABLED: '.btn.btn-primary.disabled',
+  QUIZ_RETRY_BTN: '.btn.btn-primary', // 재도전 버튼 (텍스트로 구분)
 };
 
 module.exports = {
