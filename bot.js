@@ -361,20 +361,23 @@ async function solveQuiz(page, cursor) {
       }, qIndex, texts);
       if (!clicked) return false;
       await randomDelay(600, 900);
-      // 확인 버튼 활성화 대기 후 클릭
-      try {
-        await page.waitForFunction(
-          (idx) => { const q = document.querySelectorAll('.quiz-question')[idx]; if (!q) return false; const b = q.querySelector('.btn.btn-primary'); return b && !b.classList.contains('disabled'); },
-          { timeout: 3000 }, qIndex
-        );
-      } catch { return false; }
-      await page.evaluate((idx) => {
+      // "확인" 버튼이 있을 때만 클릭 (단일클릭 제출 퀴즈는 보기 클릭으로 이미 제출됨)
+      // "재도전"/"다음 문제" 등 결과 버튼은 건드리지 않음
+      const submitHandle = await page.evaluateHandle((idx) => {
         const q = document.querySelectorAll('.quiz-question')[idx];
-        if (!q) return;
+        if (!q) return null;
         const b = q.querySelector('.btn.btn-primary:not(.disabled)');
-        if (b) { b.scrollIntoView({ block: 'center' }); b.click(); }
+        if (!b) return null;
+        const t = b.innerText.trim();
+        return (t === '확인' || t === 'Confirm' || t === 'Submit') ? b : null;
       }, qIndex);
-      console.log('  📤 확인 클릭');
+      const submitEl = submitHandle.asElement();
+      if (submitEl) {
+        await submitEl.scrollIntoView();
+        await cursor.click(submitEl);
+        console.log('  📤 확인 클릭');
+      }
+      submitHandle.dispose();
       // 결과 폴링
       const CORRECT_KEYWORDS = ['정답을 맞췄습니다', '정답입니다'];
       const NEXT_KEYWORDS = ['다음 문제', '다음', '계속', '완료', 'Next', 'Continue'];
