@@ -4,6 +4,7 @@ const { CHROME_PATH, DELAY } = require('./config');
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const logger = require('./logger');
 
 puppeteer.use(StealthPlugin());
 
@@ -24,7 +25,7 @@ async function launchBrowser() {
   }
 
   // 2. Chrome 실행
-  console.log('🌐 Chrome 실행 중...');
+  logger.info('🌐 Chrome 실행 중...');
   const chrome = spawn(CHROME_PATH, [
     `--user-data-dir=${BOT_PROFILE}`,
     '--remote-debugging-port=9222',
@@ -56,7 +57,7 @@ async function launchBrowser() {
     });
   });
 
-  console.log('🔗 Chrome 연결 성공');
+  logger.info('🔗 Chrome 연결 성공');
 
   // 4. puppeteer 연결
   const browser = await puppeteer.connect({
@@ -78,7 +79,7 @@ async function launchBrowser() {
  * 로그인 상태 확인 + 미로그인 시 대기
  */
 async function ensureLoggedIn(page) {
-  await page.goto('https://dreamhack.io', { waitUntil: 'networkidle2' });
+  await safeGoto(page, 'https://dreamhack.io', { waitUntil: 'networkidle2' });
 
   const isLoggedIn = await page.evaluate(() => {
     // 로그인 시 user-icon에 사용자 이름 텍스트가 있음
@@ -89,16 +90,16 @@ async function ensureLoggedIn(page) {
   });
 
   if (isLoggedIn) {
-    console.log('🔑 로그인 상태 확인됨');
+    logger.info('🔑 로그인 상태 확인됨');
     return;
   }
 
   // 로그인 페이지로 이동
-  console.log('\n⚠️  로그인이 필요합니다!');
-  console.log('📌 열린 Chrome 창에서 드림핵에 로그인해주세요.');
-  console.log('⏳ 로그인 완료 대기 중...\n');
+  logger.warn('⚠️  로그인이 필요합니다!');
+  logger.info('📌 열린 Chrome 창에서 드림핵에 로그인해주세요.');
+  logger.info('⏳ 로그인 완료 대기 중...');
 
-  await page.goto('https://dreamhack.io/users/login', { waitUntil: 'networkidle2' });
+  await safeGoto(page, 'https://dreamhack.io/users/login', { waitUntil: 'networkidle2' });
 
   // 로그인 완료까지 폴링 (최대 5분)
   for (let i = 0; i < 60; i++) {
@@ -115,7 +116,7 @@ async function ensureLoggedIn(page) {
         return text.length > 0 && !text.includes('로그인');
       });
       if (loggedIn) {
-        console.log('🔑 로그인 완료!');
+        logger.info('🔑 로그인 완료!');
         return;
       }
     } catch {
@@ -138,7 +139,7 @@ async function randomDelay(min, max) {
   const minutes = Math.floor(delay / 60000);
   const seconds = ((delay % 60000) / 1000).toFixed(0);
   const display = minutes > 0 ? `${minutes}분 ${seconds}초` : `${seconds}초`;
-  console.log(`⏱️  대기 중... (${display})`);
+  logger.info(`⏱️  대기 중... (${display})`);
   return sleep(delay);
 }
 
@@ -170,10 +171,31 @@ async function humanType(page, text) {
   }
 }
 
+/**
+ * 페이지 이동 시 재시도 로직 추가
+ */
+async function safeGoto(page, url, options = { waitUntil: 'networkidle2' }, maxRetries = 3) {
+  let retries = 0;
+  while (retries < maxRetries) {
+    try {
+      await page.goto(url, options);
+      return;
+    } catch (error) {
+      retries++;
+      logger.warn(`⚠️ 페이지 이동 실패 (시도 ${retries}/${maxRetries}): ${url}`);
+      if (retries >= maxRetries) {
+        throw new Error(`페이지 이동 실패 (최대 재시도 초과): ${url} - ${error.message}`);
+      }
+      await sleep(3000 * retries); // 점진적 대기
+    }
+  }
+}
+
 module.exports = {
   launchBrowser,
   ensureLoggedIn,
   randomDelay,
   randomScroll,
   humanType,
+  safeGoto,
 };
