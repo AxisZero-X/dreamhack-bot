@@ -445,6 +445,17 @@ async function solveQuiz(page, cursor) {
       }
     };
 
+    // 오답 후 재도전 버튼 클릭 (상태 초기화)
+    const clickRetry = async () => {
+      await page.evaluate((idx) => {
+        const q = document.querySelectorAll('.quiz-question')[idx];
+        if (!q) return;
+        const btn = q.querySelector('.btn.btn-primary');
+        if (btn && btn.innerText.includes('재도전')) { btn.scrollIntoView({ block: 'center' }); btn.click(); }
+      }, qIndex);
+      await randomDelay(200, 400);
+    };
+
     // 문제 텍스트와 보기 텍스트 수집
     const questionData = await page.evaluate((idx) => {
       const qs = document.querySelectorAll('.quiz-question');
@@ -515,6 +526,7 @@ JSON 배열만 출력, 다른 말 없이.`;
             break; // 해당 문제 해결 완료
           } else {
             console.log('  ❌ AI 오답. 브루트포스 전환...');
+            await clickRetry();
             await randomDelay(100, 200);
           }
         }
@@ -553,6 +565,7 @@ JSON 배열만 출력, 다른 말 없이.`;
           await handleCorrect();
         } else {
           console.log('  ❌ 오답.');
+          await clickRetry();
           await randomDelay(100, 200);
 
           // 오답 후 보기가 셔플되거나 재생성되었는지 확인
@@ -582,6 +595,7 @@ JSON 배열만 출력, 다른 말 없이.`;
               solved = true;
               await handleCorrect();
             } else {
+              await clickRetry();
               await randomDelay(100, 200);
 
               const newTexts = await getChoiceTexts();
@@ -614,6 +628,7 @@ JSON 배열만 출력, 다른 말 없이.`;
                 solved = true;
                 await handleCorrect();
               } else {
+                await clickRetry();
                 await randomDelay(100, 200);
 
                 const newTexts = await getChoiceTexts();
