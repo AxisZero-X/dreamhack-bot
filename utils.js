@@ -72,6 +72,7 @@ async function launchBrowser() {
   const browser = await puppeteer.connect({
     browserWSEndpoint: wsUrl,
     defaultViewport: null,
+    protocolTimeout: 300000, // 5분으로 타임아웃 대폭 증가
   });
 
   // cleanup 등록 (프로필은 유지 - 세션 보존)
