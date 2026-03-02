@@ -10,10 +10,7 @@ async function processLecture(page, cursor) {
 
   while (!lectureCompleted) {
     logger.info('📖 강의 내용 읽는 중... (스크롤 + 체류)');
-    await Promise.all([
-      randomDelay(DELAY.PAGE_STAY_MIN, DELAY.PAGE_STAY_MAX),
-      randomScroll(page),
-    ]);
+    await Promise.all([randomDelay(DELAY.PAGE_STAY_MIN, DELAY.PAGE_STAY_MAX), randomScroll(page)]);
 
     // 페이지 하단의 '진행하기' 혹은 '다음 주제로' 버튼 클릭 (이동이 발생할 수 있음)
     await clickCompleteButton(page, cursor);
@@ -36,20 +33,28 @@ async function processLecture(page, cursor) {
 async function clickCompleteButton(page, cursor) {
   try {
     // 버튼이 나타날 때까지 최대 5초 대기
-    await page.waitForFunction((sel) => {
-      const btns = document.querySelectorAll(sel);
-      return Array.from(btns).some(btn => btn.innerText.includes('진행하기') || btn.innerText.includes('다음 주제로'));
-    }, { timeout: 5000 }, SELECTORS.COMPLETE_BTN).catch(() => {});
+    await page
+      .waitForFunction(
+        (sel) => {
+          const btns = document.querySelectorAll(sel);
+          return Array.from(btns).some(
+            (btn) => btn.innerText.includes('진행하기') || btn.innerText.includes('다음 주제로'),
+          );
+        },
+        { timeout: 5000 },
+        SELECTORS.COMPLETE_BTN,
+      )
+      .catch(() => {});
 
     const btnText = await page.evaluate((sel) => {
       const btns = Array.from(document.querySelectorAll(sel));
 
       // '진행하기' 버튼을 우선적으로 찾음
-      let targetBtn = btns.find(btn => btn.innerText.includes('진행하기'));
+      let targetBtn = btns.find((btn) => btn.innerText.includes('진행하기'));
 
       // 없으면 '다음 주제로' 버튼 찾음
       if (!targetBtn) {
-        targetBtn = btns.find(btn => btn.innerText.includes('다음 주제로'));
+        targetBtn = btns.find((btn) => btn.innerText.includes('다음 주제로'));
       }
 
       if (targetBtn) {

@@ -9,26 +9,35 @@ const logger = require('./logger');
 puppeteer.use(StealthPlugin());
 
 // 기존에 사용하던 실제 크롬 프로필 경로 (Mac 기준)
-const USER_PROFILE = path.join(process.env.HOME || process.env.USERPROFILE, 'Library/Application Support/Google/Chrome');
+const USER_PROFILE = path.join(
+  process.env.HOME || process.env.USERPROFILE,
+  'Library/Application Support/Google/Chrome',
+);
 
 /**
  * Chrome을 사용자 전용 프로필 + 디버깅 모드로 실행, puppeteer 연결
  */
 async function launchBrowser() {
   // 1. 기존 Chrome 정리 (안전하게 종료하도록 안내하거나 강제 종료)
-  try { execSync('pkill -9 -f "Google Chrome" 2>/dev/null'); } catch {}
+  try {
+    execSync('pkill -9 -f "Google Chrome" 2>/dev/null');
+  } catch {}
   await sleep(2000);
 
   // 2. Chrome 실행
   logger.info('🌐 Chrome 실행 중...');
-  const chrome = spawn(CHROME_PATH, [
-    `--user-data-dir=${USER_PROFILE}`,
-    '--profile-directory=Default', // Default 프로필 사용 (필요시 변경)
-    '--remote-debugging-port=9222',
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--disable-blink-features=AutomationControlled',
-  ], { stdio: ['ignore', 'ignore', 'pipe'] });
+  const chrome = spawn(
+    CHROME_PATH,
+    [
+      `--user-data-dir=${USER_PROFILE}`,
+      '--profile-directory=Default', // Default 프로필 사용 (필요시 변경)
+      '--remote-debugging-port=9222',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--disable-blink-features=AutomationControlled',
+    ],
+    { stdio: ['ignore', 'ignore', 'pipe'] },
+  );
 
   // 3. stderr에서 WS endpoint 추출
   const wsUrl = await new Promise((resolve, reject) => {
@@ -62,10 +71,15 @@ async function launchBrowser() {
 
   // cleanup 등록 (프로필은 유지 - 세션 보존)
   const cleanup = () => {
-    try { chrome.kill('SIGTERM'); } catch {}
+    try {
+      chrome.kill('SIGTERM');
+    } catch {}
   };
   process.on('exit', cleanup);
-  process.on('SIGINT', () => { cleanup(); process.exit(); });
+  process.on('SIGINT', () => {
+    cleanup();
+    process.exit();
+  });
 
   return browser;
 }
@@ -123,7 +137,7 @@ async function ensureLoggedIn(page) {
 }
 
 function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**

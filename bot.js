@@ -26,7 +26,7 @@ const logger = require('./logger');
       (itemSel, incompleteSel, linkSel) => {
         const urls = [];
         const items = document.querySelectorAll(itemSel);
-        items.forEach(item => {
+        items.forEach((item) => {
           const isIncomplete = item.querySelector(incompleteSel) !== null;
           if (isIncomplete) {
             const linkEl = item.querySelector(linkSel);
@@ -98,7 +98,7 @@ const logger = require('./logger');
       (itemSel, incompleteSel, linkSel) => {
         const urls = [];
         const items = document.querySelectorAll(itemSel);
-        items.forEach(item => {
+        items.forEach((item) => {
           const isIncomplete = item.querySelector(incompleteSel) !== null;
           if (isIncomplete) {
             const linkEl = item.querySelector(linkSel);
@@ -123,7 +123,6 @@ const logger = require('./logger');
       });
       logger.info('재실행을 통해 남은 항목들을 마저 수료할 수 있습니다.');
     }
-
   } catch (error) {
     logger.error(`❌ 에러 발생: ${error.message}`);
     logger.error(error.stack);

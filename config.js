@@ -32,8 +32,8 @@ const SELECTORS = {
 
   // 강의 페이지 (learn.dreamhack.io/*)
   COMPLETE_BTN: 'button.btn.btn-primary', // "진행하기" 또는 "다음 주제로" 버튼
-  POPUP_HEADER: '.popup-header',          // "축하합니다!" 팝업 헤더
-  SLOT_WRAPPER: '.slot-wrapper',          // "커리큘럼으로" 또는 "다음 목표로" 버튼을 감싸는 div
+  POPUP_HEADER: '.popup-header', // "축하합니다!" 팝업 헤더
+  SLOT_WRAPPER: '.slot-wrapper', // "커리큘럼으로" 또는 "다음 목표로" 버튼을 감싸는 div
 
   // 퀴즈 페이지 (learn.dreamhack.io/quiz/*)
   QUIZ_TITLE: '.quiz-title',

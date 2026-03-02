@@ -19,11 +19,11 @@ async function detectQuiz(page) {
  * 퀴즈 풀이 (멀티스텝 브루트포스)
  */
 async function solveQuiz(page, cursor) {
-  const quizTitle = await page.$eval(SELECTORS.QUIZ_TITLE, el => el.innerText.trim()).catch(() => '(추출 실패)');
+  const quizTitle = await page.$eval(SELECTORS.QUIZ_TITLE, (el) => el.innerText.trim()).catch(() => '(추출 실패)');
   logger.info(`📝 퀴즈: "${quizTitle}"`);
 
   // 총 스텝 수 확인
-  const totalSteps = await page.$$eval(SELECTORS.QUIZ_STEP, steps => steps.length);
+  const totalSteps = await page.$$eval(SELECTORS.QUIZ_STEP, (steps) => steps.length);
   logger.info(`📋 총 ${totalSteps}개 문제`);
 
   // 오답 캐시 (스텝별로 실패한 인덱스 기록)
@@ -44,17 +44,21 @@ async function solveQuiz(page, cursor) {
     await randomDelay(DELAY.QUIZ_READ_MIN, DELAY.QUIZ_READ_MAX);
 
     // 현재 문제의 보기 수집
-    const choiceCount = await page.evaluate((sel, currentSel) => {
-      const currentStep = document.querySelector(currentSel);
-      let choices;
-      if (currentStep) {
-        choices = [...currentStep.querySelectorAll(sel)];
-      } else {
-        choices = [...document.querySelectorAll(sel)];
-      }
-      const visible = choices.filter(el => el.offsetParent !== null);
-      return visible.length;
-    }, SELECTORS.QUIZ_CHOICE, SELECTORS.QUIZ_STEP_CURRENT);
+    const choiceCount = await page.evaluate(
+      (sel, currentSel) => {
+        const currentStep = document.querySelector(currentSel);
+        let choices;
+        if (currentStep) {
+          choices = [...currentStep.querySelectorAll(sel)];
+        } else {
+          choices = [...document.querySelectorAll(sel)];
+        }
+        const visible = choices.filter((el) => el.offsetParent !== null);
+        return visible.length;
+      },
+      SELECTORS.QUIZ_CHOICE,
+      SELECTORS.QUIZ_STEP_CURRENT,
+    );
 
     logger.info(`  🔘 보기 ${choiceCount}개 발견`);
 
@@ -73,11 +77,15 @@ async function solveQuiz(page, cursor) {
 
       logger.info(`  🔄 [보기 ${c + 1}/${choiceCount}] 선택 중...`);
 
-      const visibleChoices = await page.evaluateHandle((sel, currentSel) => {
-        const currentStep = document.querySelector(currentSel);
-        let choices = currentStep ? [...currentStep.querySelectorAll(sel)] : [...document.querySelectorAll(sel)];
-        return choices.filter(el => el.offsetParent !== null);
-      }, SELECTORS.QUIZ_CHOICE, SELECTORS.QUIZ_STEP_CURRENT);
+      const visibleChoices = await page.evaluateHandle(
+        (sel, currentSel) => {
+          const currentStep = document.querySelector(currentSel);
+          let choices = currentStep ? [...currentStep.querySelectorAll(sel)] : [...document.querySelectorAll(sel)];
+          return choices.filter((el) => el.offsetParent !== null);
+        },
+        SELECTORS.QUIZ_CHOICE,
+        SELECTORS.QUIZ_STEP_CURRENT,
+      );
 
       const choiceHandle = await visibleChoices.evaluateHandle((arr, idx) => arr[idx], c);
       if (!choiceHandle) break;
@@ -138,11 +146,15 @@ async function solveQuiz(page, cursor) {
 }
 
 async function isCurrentStepCompleted(page) {
-  return page.evaluate((currentSel, completedSel) => {
-    const currentStep = document.querySelector(currentSel);
-    if (!currentStep) return false;
-    return currentStep.querySelector(completedSel) !== null;
-  }, SELECTORS.QUIZ_STEP_CURRENT, SELECTORS.QUIZ_STEP_COMPLETED);
+  return page.evaluate(
+    (currentSel, completedSel) => {
+      const currentStep = document.querySelector(currentSel);
+      if (!currentStep) return false;
+      return currentStep.querySelector(completedSel) !== null;
+    },
+    SELECTORS.QUIZ_STEP_CURRENT,
+    SELECTORS.QUIZ_STEP_COMPLETED,
+  );
 }
 
 async function clickNextStep(page, cursor, nextIndex) {
