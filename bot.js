@@ -379,6 +379,7 @@ async function solveQuiz(page, cursor) {
       try {
         await page.waitForFunction(
           (idx) => {
+            if (document.querySelector('.el-message-box')) return true;
             const q = document.querySelectorAll('.quiz-question')[idx];
             if (!q) return true;
             const main = q.querySelector('.question-main');
@@ -400,7 +401,6 @@ async function solveQuiz(page, cursor) {
           const text = alertBox.innerText || '';
           const alertBtn = alertBox.querySelector('.el-button--primary');
           if (alertBtn) alertBtn.click();
-          // 모달 내용에 '정답입니다', 'Correct', '축하합니다' 등이 있으면 정답 처리
           if (text.includes('정답') || text.includes('Correct') || text.includes('축하합니다') || text.includes('성공') || text.includes('통과')) {
             return { isCorrect: true, modalText: text };
           }
@@ -417,11 +417,21 @@ async function solveQuiz(page, cursor) {
         const isCorrect = q.querySelector('.check-icon, .is-success, .is-correct') !== null ||
                (!btn && !q.querySelector('.choice')) ||
                isNextBtn;
-        return { isCorrect };
+        // 디버그: 정답 판별 실패 시 현재 상태 리포트
+        const debugInfo = !isCorrect ? {
+          btnText: btn ? btn.innerText.trim() : null,
+          btnClass: btn ? btn.className : null,
+          mainClass: main ? main.className : null,
+          hasCheckIcon: !!q.querySelector('.check-icon, .is-success, .is-correct'),
+        } : null;
+        return { isCorrect, debugInfo };
       }, qIndex);
 
       if (evalResult.modalText) {
-        console.log(`  💬 모달 텍스트 확인: "${evalResult.modalText.replace(/\\n/g, ' ')}"`);
+        console.log(`  💬 모달: "${evalResult.modalText.replace(/\n/g, ' ').substring(0, 80)}"`);
+      }
+      if (evalResult.debugInfo) {
+        console.log(`  🔍 상태: btn="${evalResult.debugInfo.btnText}" cls="${evalResult.debugInfo.btnClass}" main="${evalResult.debugInfo.mainClass}"`);
       }
       return evalResult.isCorrect;
     };
