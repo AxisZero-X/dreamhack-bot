@@ -362,13 +362,13 @@ async function solveQuiz(page, cursor) {
       }, qIndex, texts);
       if (!clicked) return false;
       await randomDelay(150, 250);
-      // 확인 버튼 활성화 대기 후 클릭
+      // 확인 버튼 활성화 대기 후 클릭 (단일클릭 퀴즈는 바로 결과가 나오므로 timeout 무시)
       try {
         await page.waitForFunction(
           (idx) => { const q = document.querySelectorAll('.quiz-question')[idx]; if (!q) return false; const b = q.querySelector('.btn.btn-primary'); return b && !b.classList.contains('disabled'); },
-          { timeout: 2000 }, qIndex
+          { timeout: 2500 }, qIndex
         );
-      } catch { return false; }
+      } catch { /* 단일클릭 제출이거나 버튼 없는 경우 - 결과 폴링으로 진행 */ }
       const submitted = await page.evaluate((idx) => {
         const q = document.querySelectorAll('.quiz-question')[idx];
         if (!q) return false;
@@ -441,19 +441,30 @@ async function solveQuiz(page, cursor) {
     };
 
     const handleCorrect = async () => {
-      const clicked = await page.evaluate((idx) => {
-        const q = document.querySelectorAll('.quiz-question')[idx];
-        if (!q) return false;
-        const btn = q.querySelector('.btn.btn-primary');
-        const nextKeywords = ['다음 문제', '다음', '완료', '계속', 'Next', 'Continue'];
-        if (btn && nextKeywords.some(k => btn.innerText.includes(k))) { btn.scrollIntoView({ block: 'center' }); btn.click(); return true; }
-        return false;
-      }, qIndex);
-      if (clicked) {
-        console.log('  ➡️ 다음 문제 버튼 클릭 완료');
-        // 다음 문제 DOM이 안정될 때까지 대기
-        await randomDelay(400, 700);
+      const nextKeywords = ['다음 문제', '다음', '완료', '계속', 'Next', 'Continue'];
+      // 버튼이 갱신될 때까지 최대 3초 대기 후 클릭
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const btnText = await page.evaluate((idx) => {
+          const q = document.querySelectorAll('.quiz-question')[idx];
+          if (!q) return null;
+          const btn = q.querySelector('.btn.btn-primary');
+          return btn ? btn.innerText.trim() : null;
+        }, qIndex);
+        if (btnText !== null && nextKeywords.some(k => btnText.includes(k))) {
+          await page.evaluate((idx, keywords) => {
+            const q = document.querySelectorAll('.quiz-question')[idx];
+            if (!q) return;
+            const btn = q.querySelector('.btn.btn-primary');
+            if (btn && keywords.some(k => btn.innerText.includes(k))) { btn.scrollIntoView({ block: 'center' }); btn.click(); }
+          }, qIndex, nextKeywords);
+          console.log(`  ➡️ 다음 버튼 클릭 완료 (btn="${btnText}")`);
+          await randomDelay(400, 700);
+          return;
+        }
+        console.log(`  ⏳ 다음 버튼 대기 중... btn="${btnText}" (${attempt + 1}/6)`);
+        await randomDelay(300, 500);
       }
+      console.log('  ⚠️ 다음 버튼을 찾지 못함');
     };
 
     // 문제 텍스트와 보기 텍스트 수집
