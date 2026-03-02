@@ -369,13 +369,18 @@ async function solveQuiz(page, cursor) {
           { timeout: 2000 }, qIndex
         );
       } catch { return false; }
-      await page.evaluate((idx) => {
+      const submitted = await page.evaluate((idx) => {
         const q = document.querySelectorAll('.quiz-question')[idx];
-        if (!q) return;
+        if (!q) return false;
         const b = q.querySelector('.btn.btn-primary:not(.disabled)');
-        if (b) { b.scrollIntoView({ block: 'center' }); b.click(); }
+        if (!b) return false;
+        const t = b.innerText.trim();
+        const skipTexts = ['재도전', '다음 문제', '다음', '계속', '완료', 'Next', 'Continue'];
+        if (skipTexts.some(k => t.includes(k))) { console.log(`  ⏭️ 버튼 "${t}" 클릭 스킵 (확인 버튼 아님)`); return false; }
+        b.scrollIntoView({ block: 'center' }); b.click(); return true;
       }, qIndex);
-      console.log('  📤 확인 클릭');
+      if (submitted) console.log('  📤 확인 클릭');
+      else console.log('  ℹ️ 확인 버튼 없음 (단일클릭 제출 퀴즈)');
       // 결과 폴링
       try {
         await page.waitForFunction(
@@ -425,12 +430,23 @@ async function solveQuiz(page, cursor) {
       return evalResult.isCorrect;
     };
 
+    const clickRetry = async () => {
+      await page.evaluate((idx) => {
+        const q = document.querySelectorAll('.quiz-question')[idx];
+        if (!q) return;
+        const btn = q.querySelector('.btn.btn-primary');
+        if (btn && btn.innerText.includes('재도전')) { btn.scrollIntoView({ block: 'center' }); btn.click(); }
+      }, qIndex);
+      await randomDelay(300, 500);
+    };
+
     const handleCorrect = async () => {
       const clicked = await page.evaluate((idx) => {
         const q = document.querySelectorAll('.quiz-question')[idx];
         if (!q) return false;
         const btn = q.querySelector('.btn.btn-primary');
-        if (btn && btn.innerText.includes('다음 문제')) { btn.scrollIntoView({ block: 'center' }); btn.click(); return true; }
+        const nextKeywords = ['다음 문제', '다음', '완료', '계속', 'Next', 'Continue'];
+        if (btn && nextKeywords.some(k => btn.innerText.includes(k))) { btn.scrollIntoView({ block: 'center' }); btn.click(); return true; }
         return false;
       }, qIndex);
       if (clicked) {
@@ -510,7 +526,7 @@ JSON 배열만 출력, 다른 말 없이.`;
             break; // 해당 문제 해결 완료
           } else {
             console.log('  ❌ AI 오답. 브루트포스 전환...');
-            await randomDelay(100, 200);
+            await clickRetry();
           }
         }
       }
@@ -548,7 +564,7 @@ JSON 배열만 출력, 다른 말 없이.`;
           await handleCorrect();
         } else {
           console.log('  ❌ 오답.');
-          await randomDelay(100, 200);
+          await clickRetry();
 
           // 오답 후 보기가 셔플되거나 재생성되었는지 확인
           const newTexts = await getChoiceTexts();
@@ -577,7 +593,7 @@ JSON 배열만 출력, 다른 말 없이.`;
               solved = true;
               await handleCorrect();
             } else {
-              await randomDelay(100, 200);
+              await clickRetry();
 
               const newTexts = await getChoiceTexts();
               if (JSON.stringify(newTexts) !== currentTextsKey) {
@@ -609,7 +625,7 @@ JSON 배열만 출력, 다른 말 없이.`;
                 solved = true;
                 await handleCorrect();
               } else {
-                await randomDelay(100, 200);
+                await clickRetry();
 
                 const newTexts = await getChoiceTexts();
                 if (JSON.stringify(newTexts) !== currentTextsKey) {
