@@ -385,7 +385,7 @@ async function solveQuiz(page, cursor) {
             if (main && main.classList.contains('is-wrong')) return true;
             if (q.querySelector('.check-icon, .is-success, .is-correct')) return true;
             const btn = q.querySelector('.btn.btn-primary');
-            if (btn && btn.innerText.includes('다음 문제')) return true;
+            if (btn && ['다음 문제', '다음', '계속', '완료', 'Next', 'Continue'].some(k => btn.innerText.includes(k))) return true;
             if (btn && btn.innerText.includes('재도전')) return true;
             if (!btn && !q.querySelector('.choice')) return true;
             return false;
@@ -412,9 +412,11 @@ async function solveQuiz(page, cursor) {
         if (main && main.classList.contains('is-wrong')) return { isCorrect: false };
         const btn = q.querySelector('.btn.btn-primary');
         if (btn && btn.innerText.includes('재도전')) return { isCorrect: false };
+        const nextKeywords = ['다음 문제', '다음', '계속', '완료', 'Next', 'Continue'];
+        const isNextBtn = btn && nextKeywords.some(k => btn.innerText.includes(k));
         const isCorrect = q.querySelector('.check-icon, .is-success, .is-correct') !== null ||
                (!btn && !q.querySelector('.choice')) ||
-               (btn && btn.innerText.includes('다음 문제'));
+               isNextBtn;
         return { isCorrect };
       }, qIndex);
 
@@ -425,16 +427,20 @@ async function solveQuiz(page, cursor) {
     };
 
     const handleCorrect = async () => {
-      const clicked = await page.evaluate((idx) => {
+      const nextKeywords = ['다음 문제', '다음', '계속', '완료', 'Next', 'Continue'];
+      const clicked = await page.evaluate((idx, keywords) => {
         const q = document.querySelectorAll('.quiz-question')[idx];
         if (!q) return false;
         const btn = q.querySelector('.btn.btn-primary');
-        if (btn && btn.innerText.includes('다음 문제')) { btn.scrollIntoView({ block: 'center' }); btn.click(); return true; }
+        if (btn && keywords.some(k => btn.innerText.includes(k))) {
+          btn.scrollIntoView({ block: 'center' });
+          btn.click();
+          return btn.innerText.trim();
+        }
         return false;
-      }, qIndex);
+      }, qIndex, nextKeywords);
       if (clicked) {
-        console.log('  ➡️ 다음 문제 버튼 클릭 완료');
-        // 다음 문제 DOM이 안정될 때까지 대기
+        console.log(`  ➡️ "${clicked}" 버튼 클릭`);
         await randomDelay(400, 700);
       }
     };
