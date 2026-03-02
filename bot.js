@@ -1,5 +1,5 @@
 const { createCursor } = require('ghost-cursor');
-const { CURRICULUM_URL, DELAY, SELECTORS } = require('./config');
+const { CURRICULUM_URL, EXAM_URL, DELAY, SELECTORS } = require('./config');
 const { launchBrowser, ensureLoggedIn, randomDelay, randomScroll, humanType } = require('./utils');
 const { searchFlagForWargame } = require('./search');
 const Anthropic = require('@anthropic-ai/sdk');
@@ -65,9 +65,7 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     console.log(`🎯 미완료 강의 ${lectureUrls.length}개 발견\n`);
 
     if (lectureUrls.length === 0) {
-      console.log('✅ 모든 강의가 수료되었거나, 셀렉터를 확인하세요.');
-      await browser.close();
-      return;
+      console.log('✅ 모든 강의가 수료되었습니다. 수료 퀴즈로 이동합니다.');
     }
 
     // === 2단계: 각 강의 순회 ===
@@ -159,14 +157,15 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
         const examLink = links.find(a => a.innerText.includes('수료 퀴즈') || a.href.includes('/exam/'));
         return examLink ? examLink.href : null;
       });
-      if (examUrl) {
-        console.log(`📝 수료 퀴즈 URL: ${examUrl}`);
-        await page.goto(examUrl, { waitUntil: 'networkidle2' });
+      const resolvedExamUrl = examUrl || EXAM_URL;
+      if (resolvedExamUrl) {
+        console.log(`📝 수료 퀴즈 URL: ${resolvedExamUrl}`);
+        await page.goto(resolvedExamUrl, { waitUntil: 'networkidle2' });
         await randomDelay(2000, 4000);
         await solveQuiz(page, cursor);
         console.log('✅ 수료 퀴즈 응시 완료');
       } else {
-        console.log('⚠️ 수료 퀴즈 링크를 찾지 못했습니다.');
+        console.log('⚠️ 수료 퀴즈 링크를 찾지 못했습니다. EXAM_URL을 .env에 설정하세요.');
       }
     } catch (err) {
       console.log(`⚠️ 수료 퀴즈 처리 중 에러: ${err.message}`);

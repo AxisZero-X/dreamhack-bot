@@ -5,6 +5,7 @@ const CHROME_PATH = process.env.CHROME_PATH || '/Applications/Google Chrome.app/
 
 // --- 타겟 설정 ---
 const CURRICULUM_URL = process.env.CURRICULUM_URL || 'https://dreamhack.io/euser/curriculums/916'; // 수강할 코스 커리큘럼 URL
+const EXAM_URL = process.env.EXAM_URL || null; // 수료 퀴즈 직접 URL (예: https://learn.dreamhack.io/exam/916)
 
 // --- 딜레이 설정 (밀리초) ---
 const IS_TEST = process.env.TEST_MODE === '1';
@@ -52,6 +53,7 @@ const SELECTORS = {
 module.exports = {
   CHROME_PATH,
   CURRICULUM_URL,
+  EXAM_URL,
   DELAY,
   SELECTORS,
 };
