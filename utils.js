@@ -8,8 +8,9 @@ const logger = require('./logger');
 
 puppeteer.use(StealthPlugin());
 
-// 로컬 프로젝트 폴더 내 프로필 디렉토리 사용 (세션 유지용)
-const USER_PROFILE = path.join(process.cwd(), '.chrome_profile');
+// 프로젝트 루트 기준 절대 경로 (worktree에서 실행해도 항상 같은 프로필 사용)
+const PROJECT_ROOT = path.resolve(__dirname);
+const USER_PROFILE = path.join(PROJECT_ROOT, '.chrome_profile');
 
 /**
  * Chrome을 사용자 전용 프로필 + 디버깅 모드로 실행, puppeteer 연결
