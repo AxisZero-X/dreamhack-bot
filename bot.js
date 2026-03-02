@@ -376,15 +376,15 @@ async function solveQuiz(page, cursor) {
       }, qIndex);
       console.log('  📤 확인 클릭');
       // 결과 폴링
-      const CORRECT_KEYWORDS = ['정답을 맞췄습니다', '정답입니다', '정답', 'Correct', '축하합니다', '성공', '통과'];
+      const CORRECT_KEYWORDS = ['정답을 맞췄습니다', '정답입니다'];
       const NEXT_KEYWORDS = ['다음 문제', '다음', '계속', '완료', 'Next', 'Continue'];
       try {
         await page.waitForFunction(
           (idx, correctKws, nextKws) => {
             if (document.querySelector('.el-message-box')) return true;
-            // 페이지 전체에서 정답 피드백 텍스트 확인
-            const bodyText = document.body.innerText;
-            if (correctKws.some(k => bodyText.includes(k))) return true;
+            // quiz-question 밖 피드백 영역에서만 정답 텍스트 확인 (문제 본문의 "정답" 오감지 방지)
+            const feedbackEl = document.querySelector('.quiz-feedback, .feedback, .result-message, .answer-feedback');
+            if (feedbackEl && correctKws.some(k => feedbackEl.innerText.includes(k))) return true;
             const q = document.querySelectorAll('.quiz-question')[idx];
             if (!q) return true;
             const main = q.querySelector('.question-main');
@@ -411,9 +411,9 @@ async function solveQuiz(page, cursor) {
           }
           return { isCorrect: false, modalText: text };
         }
-        // 페이지 전체 정답 피드백 텍스트 확인 (question 영역 밖에 표시될 수 있음)
-        const bodyText = document.body.innerText;
-        if (correctKws.some(k => bodyText.includes(k))) {
+        // quiz-question 밖 피드백 영역에서만 정답 텍스트 확인
+        const feedbackEl = document.querySelector('.quiz-feedback, .feedback, .result-message, .answer-feedback');
+        if (feedbackEl && correctKws.some(k => feedbackEl.innerText.includes(k))) {
           return { isCorrect: true };
         }
         const q = document.querySelectorAll('.quiz-question')[idx];
