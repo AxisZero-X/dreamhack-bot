@@ -261,8 +261,14 @@ async function solveQuiz(page, cursor) {
       if (main && main.classList.contains('is-wrong')) return false;
       // 정답 아이콘이나 정답 클래스가 있으면 완료
       if (q.querySelector('.check-icon, .is-success, .is-correct')) return true;
+      // "다음 문제" 버튼이 있으면 완료 (이미 정답 처리됨)
+      const btn = q.querySelector('.btn.btn-primary');
+      if (btn && ['다음 문제', '다음', '완료', '계속'].some(k => btn.innerText.includes(k))) return true;
+      // 정답 텍스트가 있으면 완료
+      const qText = q.innerText || '';
+      if (['정답을 맞췄습니다', '정답입니다', '잘했습니다'].some(t => qText.includes(t))) return true;
       // 보기도 없고 버튼도 없으면 완료 (다음 문제로 넘어간 상태)
-      if (!q.querySelector('.choice') && !q.querySelector('.btn.btn-primary')) return true;
+      if (!q.querySelector('.choice') && !btn) return true;
       return false;
     }, qIndex);
 
@@ -453,17 +459,12 @@ async function solveQuiz(page, cursor) {
 
     const handleCorrect = async () => {
       const nextKeywords = ['다음 문제', '다음', '완료', '계속', 'Next', 'Continue'];
-      // 버튼이 갱신될 때까지 최대 3초 대기 후 클릭 (quiz-question 내부 → 페이지 전체 순)
+      // quiz-question 내부에서 버튼이 갱신될 때까지 최대 3초 대기 후 클릭
       for (let attempt = 0; attempt < 6; attempt++) {
         const result = await page.evaluate((idx, keywords) => {
-          // 1) quiz-question 내부 검색
           const q = document.querySelectorAll('.quiz-question')[idx];
-          let btn = q ? q.querySelector('.btn.btn-primary') : null;
-          if (!btn || !keywords.some(k => btn.innerText.includes(k))) {
-            // 2) 페이지 전체 검색
-            btn = Array.from(document.querySelectorAll('.btn.btn-primary'))
-              .find(b => b.offsetParent !== null && keywords.some(k => b.innerText.includes(k)));
-          }
+          if (!q) return null;
+          const btn = q.querySelector('.btn.btn-primary');
           if (btn && keywords.some(k => btn.innerText.includes(k))) {
             btn.scrollIntoView({ block: 'center' }); btn.click();
             return btn.innerText.trim();
