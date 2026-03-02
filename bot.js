@@ -360,12 +360,12 @@ async function solveQuiz(page, cursor) {
         return true;
       }, qIndex, texts);
       if (!clicked) return false;
-      await randomDelay(150, 250);
+      await randomDelay(600, 900);
       // 확인 버튼 활성화 대기 후 클릭
       try {
         await page.waitForFunction(
           (idx) => { const q = document.querySelectorAll('.quiz-question')[idx]; if (!q) return false; const b = q.querySelector('.btn.btn-primary'); return b && !b.classList.contains('disabled'); },
-          { timeout: 2000 }, qIndex
+          { timeout: 3000 }, qIndex
         );
       } catch { return false; }
       await page.evaluate((idx) => {
@@ -396,7 +396,7 @@ async function solveQuiz(page, cursor) {
             if (!btn && !q.querySelector('.choice')) return true;
             return false;
           },
-          { timeout: 3000, polling: 100 }, qIndex, CORRECT_KEYWORDS, NEXT_KEYWORDS
+          { timeout: 5000, polling: 100 }, qIndex, CORRECT_KEYWORDS, NEXT_KEYWORDS
         );
       } catch { /* timeout */ }
       // 정답 여부 판별
@@ -464,7 +464,7 @@ async function solveQuiz(page, cursor) {
       }, qIndex, nextKeywords);
       if (clicked) {
         console.log(`  ➡️ "${clicked}" 버튼 클릭`);
-        await randomDelay(400, 700);
+        await randomDelay(800, 1200);
       }
     };
 
@@ -550,7 +550,7 @@ JSON 배열만 출력, 다른 말 없이.`;
           } else {
             console.log('  ❌ AI 오답. 브루트포스 전환...');
             await clickRetry();
-            await randomDelay(100, 200);
+            await randomDelay(600, 900);
           }
         }
       }
@@ -589,7 +589,7 @@ JSON 배열만 출력, 다른 말 없이.`;
         } else {
           console.log('  ❌ 오답.');
           await clickRetry();
-          await randomDelay(100, 200);
+          await randomDelay(600, 900);
 
           // 오답 후 보기가 셔플되거나 재생성되었는지 확인
           const newTexts = await getChoiceTexts();
@@ -619,7 +619,7 @@ JSON 배열만 출력, 다른 말 없이.`;
               await handleCorrect();
             } else {
               await clickRetry();
-              await randomDelay(100, 200);
+              await randomDelay(600, 900);
 
               const newTexts = await getChoiceTexts();
               if (JSON.stringify(newTexts) !== currentTextsKey) {
@@ -652,7 +652,7 @@ JSON 배열만 출력, 다른 말 없이.`;
                 await handleCorrect();
               } else {
                 await clickRetry();
-                await randomDelay(100, 200);
+                await randomDelay(600, 900);
 
                 const newTexts = await getChoiceTexts();
                 if (JSON.stringify(newTexts) !== currentTextsKey) {
