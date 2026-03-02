@@ -252,28 +252,41 @@ async function solveQuiz(page, cursor) {
     await randomDelay(200, 400);
 
     // 해당 문제(qIndex)가 이미 완료(정답) 처리되었는지 확인
-    const isCompleted = await page.evaluate((idx) => {
+    const completionState = await page.evaluate((idx) => {
+      const nextKeywords = ['다음 문제', '다음', '완료', '계속', 'Next', 'Continue'];
       const qs = document.querySelectorAll('.quiz-question');
-      if (!qs[idx]) return false;
+      if (!qs[idx]) return { isCompleted: false };
       const q = qs[idx];
+
       // 오답 상태(is-wrong)면 완료 아님
       const main = q.querySelector('.question-main');
-      if (main && main.classList.contains('is-wrong')) return false;
+      if (main && main.classList.contains('is-wrong')) return { isCompleted: false };
+
       // 정답 아이콘이나 정답 클래스가 있으면 완료
-      if (q.querySelector('.check-icon, .is-success, .is-correct')) return true;
-      // "다음 문제" 버튼이 있으면 완료 (이미 정답 처리됨)
-      const btn = q.querySelector('.btn.btn-primary');
-      if (btn && ['다음 문제', '다음', '완료', '계속'].some(k => btn.innerText.includes(k))) return true;
+      if (q.querySelector('.check-icon, .is-success, .is-correct')) return { isCompleted: true, hasNext: false };
+
+      // "다음 문제" 버튼 확인: 현재 문제 내부 또는 문제 외부(다른 문제에 속하지 않은 버튼)
+      const btn = Array.from(document.querySelectorAll('.btn.btn-primary')).find(b => {
+        if (!b.offsetParent || !nextKeywords.some(k => b.innerText.includes(k))) return false;
+        const parentQ = b.closest('.quiz-question');
+        return !parentQ || parentQ === q;
+      });
+      if (btn) return { isCompleted: true, hasNext: true };
+
       // 정답 텍스트가 있으면 완료
       const qText = q.innerText || '';
-      if (['정답을 맞췄습니다', '정답입니다', '잘했습니다'].some(t => qText.includes(t))) return true;
+      if (['정답을 맞췄습니다', '정답입니다', '잘했습니다'].some(t => qText.includes(t))) return { isCompleted: true, hasNext: false };
+
       // 보기도 없고 버튼도 없으면 완료 (다음 문제로 넘어간 상태)
-      if (!q.querySelector('.choice') && !btn) return true;
-      return false;
+      if (!q.querySelector('.choice') && !btn) return { isCompleted: true, hasNext: false };
+      return { isCompleted: false };
     }, qIndex);
 
-    if (isCompleted) {
+    if (completionState.isCompleted) {
       console.log('  ⏭️  이미 완료된 문제, 다음으로 이동');
+      if (completionState.hasNext) {
+        await handleCorrect(1); // 이미 완료되었으므로 짧게 확인 후 클릭
+      }
       continue;
     }
 
@@ -399,10 +412,18 @@ async function solveQuiz(page, cursor) {
             const main = q.querySelector('.question-main');
             if (main && main.classList.contains('is-wrong')) return true;
             if (q.querySelector('.check-icon, .is-success, .is-correct')) return true;
-            const btn = q.querySelector('.btn.btn-primary') || document.querySelector('.btn.btn-primary');
-            if (btn && nextKeys.some(k => btn.innerText.includes(k))) return true;
-            if (btn && btn.innerText.includes('재도전')) return true;
-            if (!btn && !q.querySelector('.choice')) return true;
+
+            // 현재 문제 내부 또는 전역 "다음" 버튼 확인
+            const btn = Array.from(document.querySelectorAll('.btn.btn-primary')).find(b => {
+              if (!b.offsetParent || !nextKeys.some(k => b.innerText.includes(k))) return false;
+              const parentQ = b.closest('.quiz-question');
+              return !parentQ || parentQ === q;
+            });
+            if (btn) return true;
+
+            const qBtn = q.querySelector('.btn.btn-primary');
+            if (qBtn && qBtn.innerText.includes('재도전')) return true;
+            if (!qBtn && !q.querySelector('.choice')) return true;
             return false;
           },
           { timeout: 3000, polling: 100 }, qIndex, CORRECT_TEXTS, NEXT_KEYS
@@ -427,14 +448,25 @@ async function solveQuiz(page, cursor) {
         if (correctTexts.some(t => qText.includes(t))) return { isCorrect: true };
         const main = q.querySelector('.question-main');
         if (main && main.classList.contains('is-wrong')) return { isCorrect: false };
-        // 재도전 버튼: 가시 여부 확인
-        const btn = q.querySelector('.btn.btn-primary');
-        if (btn && btn.offsetParent !== null && btn.innerText.includes('재도전')) return { isCorrect: false };
+
+        // 재도전 버튼 확인: 현재 문제 내부 또는 전역(다른 문제에 속하지 않음)
+        const retryBtn = Array.from(document.querySelectorAll('.btn.btn-primary')).find(b => {
+          if (!b.offsetParent || !b.innerText.includes('재도전')) return false;
+          const parentQ = b.closest('.quiz-question');
+          return !parentQ || parentQ === q;
+        });
+        if (retryBtn) return { isCorrect: false };
+
         if (q.querySelector('.check-icon, .is-success, .is-correct')) return { isCorrect: true };
-        // 페이지 전체에서 다음 버튼 확인
-        const anyBtn = document.querySelector('.btn.btn-primary');
-        if (anyBtn && nextKeys.some(k => anyBtn.innerText.includes(k))) return { isCorrect: true };
-        if (btn && nextKeys.some(k => btn.innerText.includes(k))) return { isCorrect: true };
+
+        // 현재 문제 내부 또는 전역(다른 문제에 속하지 않음) "다음" 버튼 확인
+        const nextBtn = Array.from(document.querySelectorAll('.btn.btn-primary')).find(b => {
+          if (!b.offsetParent || !nextKeys.some(k => b.innerText.includes(k))) return false;
+          const parentQ = b.closest('.quiz-question');
+          return !parentQ || parentQ === q;
+        });
+        if (nextBtn) return { isCorrect: true };
+
         return { isCorrect: false };
       }, qIndex, CORRECT_TEXTS, NEXT_KEYS);
 
@@ -447,20 +479,27 @@ async function solveQuiz(page, cursor) {
     const clickRetry = async () => {
       const handle = await page.evaluateHandle((idx) => {
         const q = document.querySelectorAll('.quiz-question')[idx];
-        if (!q) return null;
-        const btn = q.querySelector('.btn.btn-primary');
-        return (btn && btn.innerText.includes('재도전')) ? btn : null;
+        const btn = Array.from(document.querySelectorAll('.btn.btn-primary')).find(b => {
+          if (!b.offsetParent || !b.innerText.includes('재도전')) return false;
+          const parentQ = b.closest('.quiz-question');
+          return !parentQ || parentQ === q; // 현재 문제 내부 또는 전역 재도전 버튼
+        });
+        return btn || null;
       }, qIndex);
       const el = handle.asElement();
-      if (el) { await el.scrollIntoView(); await el.click(); }
+      if (el) {
+        console.log('  🔄 재도전 버튼 클릭');
+        await el.scrollIntoView();
+        await el.click();
+      }
       handle.dispose();
       await randomDelay(400, 600);
     };
 
-    const handleCorrect = async () => {
+    const handleCorrect = async (maxAttempts = 6) => {
       const nextKeywords = ['다음 문제', '다음', '완료', '계속', 'Next', 'Continue'];
       // 버튼 탐색: 현재 quiz-question 내부 OR quiz-question 밖 (다른 문제 버튼 제외)
-      for (let attempt = 0; attempt < 6; attempt++) {
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
         const result = await page.evaluate((idx, keywords) => {
           const q = document.querySelectorAll('.quiz-question')[idx];
           const btn = Array.from(document.querySelectorAll('.btn.btn-primary')).find(b => {
@@ -469,7 +508,11 @@ async function solveQuiz(page, cursor) {
             const parentQ = b.closest('.quiz-question');
             return !parentQ || parentQ === q; // 현재 문제 또는 문제 바깥
           });
-          if (btn) { btn.scrollIntoView({ block: 'center' }); btn.click(); return btn.innerText.trim(); }
+          if (btn) {
+            btn.scrollIntoView({ block: 'center' });
+            btn.click();
+            return btn.innerText.trim();
+          }
           return null;
         }, qIndex, nextKeywords);
         if (result !== null) {
