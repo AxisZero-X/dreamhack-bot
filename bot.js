@@ -459,16 +459,17 @@ async function solveQuiz(page, cursor) {
 
     const handleCorrect = async () => {
       const nextKeywords = ['다음 문제', '다음', '완료', '계속', 'Next', 'Continue'];
-      // quiz-question 내부에서 버튼이 갱신될 때까지 최대 3초 대기 후 클릭
+      // 버튼 탐색: 현재 quiz-question 내부 OR quiz-question 밖 (다른 문제 버튼 제외)
       for (let attempt = 0; attempt < 6; attempt++) {
         const result = await page.evaluate((idx, keywords) => {
           const q = document.querySelectorAll('.quiz-question')[idx];
-          if (!q) return null;
-          const btn = q.querySelector('.btn.btn-primary');
-          if (btn && keywords.some(k => btn.innerText.includes(k))) {
-            btn.scrollIntoView({ block: 'center' }); btn.click();
-            return btn.innerText.trim();
-          }
+          const btn = Array.from(document.querySelectorAll('.btn.btn-primary')).find(b => {
+            if (!b.offsetParent) return false;
+            if (!keywords.some(k => b.innerText.includes(k))) return false;
+            const parentQ = b.closest('.quiz-question');
+            return !parentQ || parentQ === q; // 현재 문제 또는 문제 바깥
+          });
+          if (btn) { btn.scrollIntoView({ block: 'center' }); btn.click(); return btn.innerText.trim(); }
           return null;
         }, qIndex, nextKeywords);
         if (result !== null) {
