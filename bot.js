@@ -376,62 +376,65 @@ async function solveQuiz(page, cursor) {
       }, qIndex);
       console.log('  📤 확인 클릭');
       // 결과 폴링
+      const CORRECT_KEYWORDS = ['정답을 맞췄습니다', '정답입니다', '정답', 'Correct', '축하합니다', '성공', '통과'];
+      const NEXT_KEYWORDS = ['다음 문제', '다음', '계속', '완료', 'Next', 'Continue'];
       try {
         await page.waitForFunction(
-          (idx) => {
+          (idx, correctKws, nextKws) => {
             if (document.querySelector('.el-message-box')) return true;
+            // 페이지 전체에서 정답 피드백 텍스트 확인
+            const bodyText = document.body.innerText;
+            if (correctKws.some(k => bodyText.includes(k))) return true;
             const q = document.querySelectorAll('.quiz-question')[idx];
             if (!q) return true;
             const main = q.querySelector('.question-main');
             if (main && main.classList.contains('is-wrong')) return true;
             if (q.querySelector('.check-icon, .is-success, .is-correct')) return true;
             const btn = q.querySelector('.btn.btn-primary');
-            if (btn && ['다음 문제', '다음', '계속', '완료', 'Next', 'Continue'].some(k => btn.innerText.includes(k))) return true;
+            if (btn && nextKws.some(k => btn.innerText.includes(k))) return true;
             if (btn && btn.innerText.includes('재도전')) return true;
             if (!btn && !q.querySelector('.choice')) return true;
             return false;
           },
-          { timeout: 3000, polling: 100 }, qIndex
+          { timeout: 3000, polling: 100 }, qIndex, CORRECT_KEYWORDS, NEXT_KEYWORDS
         );
       } catch { /* timeout */ }
       // 정답 여부 판별
-      const evalResult = await page.evaluate((idx) => {
+      const evalResult = await page.evaluate((idx, correctKws, nextKws) => {
         const alertBox = document.querySelector('.el-message-box');
         if (alertBox) {
           const text = alertBox.innerText || '';
           const alertBtn = alertBox.querySelector('.el-button--primary');
           if (alertBtn) alertBtn.click();
-          if (text.includes('정답') || text.includes('Correct') || text.includes('축하합니다') || text.includes('성공') || text.includes('통과')) {
+          if (correctKws.some(k => text.includes(k))) {
             return { isCorrect: true, modalText: text };
           }
           return { isCorrect: false, modalText: text };
         }
+        // 페이지 전체 정답 피드백 텍스트 확인 (question 영역 밖에 표시될 수 있음)
+        const bodyText = document.body.innerText;
+        if (correctKws.some(k => bodyText.includes(k))) {
+          return { isCorrect: true };
+        }
         const q = document.querySelectorAll('.quiz-question')[idx];
         if (!q) return { isCorrect: true };
         const main = q.querySelector('.question-main');
-        if (main && main.classList.contains('is-wrong')) return { isCorrect: false };
+        if (main && (main.classList.contains('is-wrong') || main.classList.contains('is-error'))) return { isCorrect: false };
         const btn = q.querySelector('.btn.btn-primary');
         if (btn && btn.innerText.includes('재도전')) return { isCorrect: false };
-        const nextKeywords = ['다음 문제', '다음', '계속', '완료', 'Next', 'Continue'];
-        const isNextBtn = btn && nextKeywords.some(k => btn.innerText.includes(k));
+        const isNextBtn = btn && nextKws.some(k => btn.innerText.includes(k));
         const isCorrect = q.querySelector('.check-icon, .is-success, .is-correct') !== null ||
                (!btn && !q.querySelector('.choice')) ||
                isNextBtn;
-        // 디버그: 정답 판별 실패 시 현재 상태 리포트
-        const debugInfo = !isCorrect ? {
-          btnText: btn ? btn.innerText.trim() : null,
-          btnClass: btn ? btn.className : null,
-          mainClass: main ? main.className : null,
-          hasCheckIcon: !!q.querySelector('.check-icon, .is-success, .is-correct'),
-        } : null;
+        const debugInfo = !isCorrect ? { btnText: btn ? btn.innerText.trim() : null } : null;
         return { isCorrect, debugInfo };
-      }, qIndex);
+      }, qIndex, CORRECT_KEYWORDS, NEXT_KEYWORDS);
 
       if (evalResult.modalText) {
         console.log(`  💬 모달: "${evalResult.modalText.replace(/\n/g, ' ').substring(0, 80)}"`);
       }
       if (evalResult.debugInfo) {
-        console.log(`  🔍 상태: btn="${evalResult.debugInfo.btnText}" cls="${evalResult.debugInfo.btnClass}" main="${evalResult.debugInfo.mainClass}"`);
+        console.log(`  🔍 btn="${evalResult.debugInfo.btnText}"`);
       }
       return evalResult.isCorrect;
     };
@@ -439,13 +442,23 @@ async function solveQuiz(page, cursor) {
     const handleCorrect = async () => {
       const nextKeywords = ['다음 문제', '다음', '계속', '완료', 'Next', 'Continue'];
       const clicked = await page.evaluate((idx, keywords) => {
+        // 1) question 내부 버튼 먼저 탐색
         const q = document.querySelectorAll('.quiz-question')[idx];
-        if (!q) return false;
-        const btn = q.querySelector('.btn.btn-primary');
-        if (btn && keywords.some(k => btn.innerText.includes(k))) {
-          btn.scrollIntoView({ block: 'center' });
-          btn.click();
-          return btn.innerText.trim();
+        if (q) {
+          const btn = q.querySelector('.btn.btn-primary');
+          if (btn && keywords.some(k => btn.innerText.includes(k))) {
+            btn.scrollIntoView({ block: 'center' });
+            btn.click();
+            return btn.innerText.trim();
+          }
+        }
+        // 2) 페이지 전체에서 다음 버튼 탐색 (정답 피드백 후 외부에 버튼이 생기는 경우)
+        const allBtns = [...document.querySelectorAll('.btn.btn-primary')];
+        const nextBtn = allBtns.find(b => keywords.some(k => b.innerText.includes(k)));
+        if (nextBtn) {
+          nextBtn.scrollIntoView({ block: 'center' });
+          nextBtn.click();
+          return nextBtn.innerText.trim();
         }
         return false;
       }, qIndex, nextKeywords);
