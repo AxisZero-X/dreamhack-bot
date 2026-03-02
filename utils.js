@@ -8,31 +8,26 @@ const logger = require('./logger');
 
 puppeteer.use(StealthPlugin());
 
-// 봇 전용 프로필 (세션 유지됨, 재실행 시 재로그인 불필요)
-const BOT_PROFILE = path.join(__dirname, '.chrome-profile');
+// 기존에 사용하던 실제 크롬 프로필 경로 (Mac 기준)
+const USER_PROFILE = path.join(process.env.HOME || process.env.USERPROFILE, 'Library/Application Support/Google/Chrome');
 
 /**
- * Chrome을 봇 전용 프로필 + 디버깅 모드로 실행, puppeteer 연결
+ * Chrome을 사용자 전용 프로필 + 디버깅 모드로 실행, puppeteer 연결
  */
 async function launchBrowser() {
-  // 1. 기존 Chrome 정리
+  // 1. 기존 Chrome 정리 (안전하게 종료하도록 안내하거나 강제 종료)
   try { execSync('pkill -9 -f "Google Chrome" 2>/dev/null'); } catch {}
   await sleep(2000);
-
-  // 봇 프로필 디렉토리 생성
-  if (!fs.existsSync(BOT_PROFILE)) {
-    fs.mkdirSync(BOT_PROFILE, { recursive: true });
-  }
 
   // 2. Chrome 실행
   logger.info('🌐 Chrome 실행 중...');
   const chrome = spawn(CHROME_PATH, [
-    `--user-data-dir=${BOT_PROFILE}`,
+    `--user-data-dir=${USER_PROFILE}`,
+    '--profile-directory=Default', // Default 프로필 사용 (필요시 변경)
     '--remote-debugging-port=9222',
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-blink-features=AutomationControlled',
-    '--no-sandbox',
   ], { stdio: ['ignore', 'ignore', 'pipe'] });
 
   // 3. stderr에서 WS endpoint 추출
