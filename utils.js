@@ -145,6 +145,11 @@ function sleep(ms) {
  */
 async function randomDelay(min, max) {
   const delay = Math.floor(Math.random() * (max - min + 1)) + min;
+
+  if (process.env.TEST_MODE === '1') {
+    return sleep(Math.min(delay, 500));
+  }
+
   const minutes = Math.floor(delay / 60000);
   const seconds = ((delay % 60000) / 1000).toFixed(0);
   const display = minutes > 0 ? `${minutes}분 ${seconds}초` : `${seconds}초`;
@@ -161,9 +166,14 @@ async function randomScroll(page) {
     const direction = Math.random() > 0.5 ? 1 : -1;
     const amount = (Math.floor(Math.random() * 700) + 300) * direction;
 
-    await page.evaluate((scrollAmount) => {
-      window.scrollBy({ top: scrollAmount, behavior: 'smooth' });
-    }, amount);
+    try {
+      await page.evaluate((scrollAmount) => {
+        window.scrollBy({ top: scrollAmount, behavior: 'smooth' });
+      }, amount);
+    } catch (err) {
+      // 프레임 분리(detached frame) 등 에러 시 무시하고 스크롤 종료 (네비게이션 중일 수 있음)
+      break;
+    }
 
     await randomDelay(DELAY.SCROLL_PAUSE_MIN, DELAY.SCROLL_PAUSE_MAX);
   }
