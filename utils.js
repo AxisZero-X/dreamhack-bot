@@ -8,8 +8,16 @@ const logger = require('./logger');
 
 puppeteer.use(StealthPlugin());
 
-// 로컬 프로젝트 폴더 내 프로필 디렉토리 사용 (세션 유지용)
-const USER_PROFILE = path.join(process.cwd(), '.chrome_profile');
+// 메인 레포 루트의 프로필 디렉토리 사용 (워크트리에서도 동일 세션 유지)
+let REPO_ROOT;
+try {
+  const gitCommonDir = execSync('git rev-parse --git-common-dir', { cwd: __dirname, encoding: 'utf8' }).trim();
+  const absGitDir = path.isAbsolute(gitCommonDir) ? gitCommonDir : path.resolve(__dirname, gitCommonDir);
+  REPO_ROOT = path.dirname(absGitDir);
+} catch {
+  REPO_ROOT = __dirname;
+}
+const USER_PROFILE = path.join(REPO_ROOT, '.chrome_profile');
 
 /**
  * Chrome을 사용자 전용 프로필 + 디버깅 모드로 실행, puppeteer 연결
