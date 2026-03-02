@@ -301,6 +301,16 @@ async function solveQuiz(page, cursor) {
 
     console.log(`  🔘 보기 ${choiceCount}개 발견`);
 
+    // 문제 데이터 추출 (AI 프롬프트용)
+    const questionData = await page.evaluate((idx) => {
+      const q = document.querySelectorAll('.quiz-question')[idx];
+      if (!q) return { questionText: '', isMulti: false };
+      const text = q.querySelector('.question-main')?.innerText.trim() || '';
+      // 다중 선택 여부 확인 (체크박스 존재 여부 등)
+      const isMulti = q.querySelector('.el-checkbox') !== null || text.includes('모두 고르') || text.includes('다르지 않은');
+      return { questionText: text, isMulti: isMulti };
+    }, qIndex);
+
     if (choiceCount === 0) {
       // 주관식(textarea) 처리
       const hasTextarea = await page.evaluate((idx) => {
