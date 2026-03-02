@@ -5,7 +5,7 @@ const logFormat = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.printf(({ timestamp, level, message }) => {
     return `[${timestamp}] ${level.toUpperCase()}: ${message}`;
-  })
+  }),
 );
 
 const logger = winston.createLogger({
@@ -13,19 +13,16 @@ const logger = winston.createLogger({
   format: logFormat,
   transports: [
     new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        logFormat
-      )
+      format: winston.format.combine(winston.format.colorize(), logFormat),
     }),
     new winston.transports.File({
       filename: path.join(__dirname, 'logs', 'error.log'),
-      level: 'error'
+      level: 'error',
     }),
     new winston.transports.File({
-      filename: path.join(__dirname, 'logs', 'bot.log')
-    })
-  ]
+      filename: path.join(__dirname, 'logs', 'bot.log'),
+    }),
+  ],
 });
 
 module.exports = logger;
