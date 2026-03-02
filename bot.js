@@ -441,41 +441,42 @@ async function solveQuiz(page, cursor) {
 
     const handleCorrect = async () => {
       const nextKeywords = ['다음 문제', '다음', '계속', '완료', 'Next', 'Continue'];
-      const clicked = await page.evaluate((idx, keywords) => {
-        // 1) question 내부 버튼 먼저 탐색
+      // evaluate로 버튼 element handle 획득 후 cursor로 실제 클릭
+      const btnHandle = await page.evaluateHandle((idx, keywords) => {
         const q = document.querySelectorAll('.quiz-question')[idx];
         if (q) {
           const btn = q.querySelector('.btn.btn-primary');
-          if (btn && keywords.some(k => btn.innerText.includes(k))) {
-            btn.scrollIntoView({ block: 'center' });
-            btn.click();
-            return btn.innerText.trim();
-          }
+          if (btn && keywords.some(k => btn.innerText.includes(k))) return btn;
         }
-        // 2) 페이지 전체에서 다음 버튼 탐색 (정답 피드백 후 외부에 버튼이 생기는 경우)
         const allBtns = [...document.querySelectorAll('.btn.btn-primary')];
-        const nextBtn = allBtns.find(b => keywords.some(k => b.innerText.includes(k)));
-        if (nextBtn) {
-          nextBtn.scrollIntoView({ block: 'center' });
-          nextBtn.click();
-          return nextBtn.innerText.trim();
-        }
-        return false;
+        return allBtns.find(b => keywords.some(k => b.innerText.includes(k))) || null;
       }, qIndex, nextKeywords);
-      if (clicked) {
-        console.log(`  ➡️ "${clicked}" 버튼 클릭`);
+
+      const btnEl = btnHandle.asElement();
+      if (btnEl) {
+        const btnText = await btnEl.evaluate(b => b.innerText.trim());
+        await btnEl.scrollIntoView();
+        await cursor.click(btnEl);
+        console.log(`  ➡️ "${btnText}" 버튼 클릭`);
         await randomDelay(800, 1200);
       }
+      btnHandle.dispose();
     };
 
     // 오답 후 재도전 버튼 클릭 (상태 초기화)
     const clickRetry = async () => {
-      await page.evaluate((idx) => {
+      const retryHandle = await page.evaluateHandle((idx) => {
         const q = document.querySelectorAll('.quiz-question')[idx];
-        if (!q) return;
+        if (!q) return null;
         const btn = q.querySelector('.btn.btn-primary');
-        if (btn && btn.innerText.includes('재도전')) { btn.scrollIntoView({ block: 'center' }); btn.click(); }
+        return (btn && btn.innerText.includes('재도전')) ? btn : null;
       }, qIndex);
+      const retryEl = retryHandle.asElement();
+      if (retryEl) {
+        await retryEl.scrollIntoView();
+        await cursor.click(retryEl);
+      }
+      retryHandle.dispose();
       await randomDelay(200, 400);
     };
 
