@@ -3,9 +3,54 @@ const { CURRICULUM_URL, EXAM_URL, DELAY, SELECTORS } = require('./config');
 const { launchBrowser, ensureLoggedIn, randomDelay, randomScroll, humanType, getDynamicDelay } = require('./utils');
 const { searchFlagForWargame } = require('./search');
 const aiProvider = require('./aiProvider');
+const readline = require('readline');
+
+/**
+ * 목표 수강률 입력 프롬프트
+ */
+async function askTargetRate() {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+  
+  return new Promise((resolve) => {
+    rl.question('🎯 목표 수강률을 입력하세요 (1-100, Enter=100): ', (answer) => {
+      rl.close();
+      const rate = parseInt(answer.trim()) || 100;
+      const validRate = Math.min(100, Math.max(1, rate));
+      resolve(validRate);
+    });
+  });
+}
+
+/**
+ * 커리큘럼 페이지에서 현재 수강률 추출
+ */
+async function getCurrentCompletionRate(page, curriculumUrl) {
+  await page.goto(curriculumUrl, { waitUntil: 'networkidle2' });
+  await randomDelay(1000, 2000);
+  
+  const rate = await page.evaluate(() => {
+    const periodDiv = document.querySelector('.type-period');
+    if (!periodDiv) return 0;
+    
+    const text = periodDiv.innerText || periodDiv.textContent;
+    // "통합 과제 커리큘럼 / 총 368일 (D-277) / 30.9%" 형식에서 숫자 추출
+    const match = text.match(/(\d+\.?\d*)%/);
+    return match ? parseFloat(match[1]) : 0;
+  });
+  
+  console.log(`📊 현재 수강률: ${rate}%`);
+  return rate;
+}
 
 (async () => {
   console.log('🚀 드림핵 자동 수강 봇 시작...\n');
+  
+  // 🎯 목표 수강률 입력 받기
+  const TARGET_RATE = await askTargetRate();
+  console.log(`✅ 목표 수강률: ${TARGET_RATE}%\n`);
   console.log('🛡️  Anomaly Detection 우회 모드 활성화 (Priority 3 적용)\n');
 
   const browser = await launchBrowser();
@@ -161,6 +206,16 @@ const aiProvider = require('./aiProvider');
       console.log(`✅ [${i + 1}] 완료 (누적: ${totalMinutes}분)`);
       completedLectures++;
 
+      // 🎯 수강률 체크
+      const currentRate = await getCurrentCompletionRate(page, CURRICULUM_URL);
+      console.log(`📊 현재 수강률: ${currentRate}% (목표: ${TARGET_RATE}%)`);
+      
+      if (currentRate >= TARGET_RATE) {
+        console.log(`\n🎉 목표 수강률 ${TARGET_RATE}% 달성! (현재: ${currentRate}%)`);
+        console.log('봇을 종료합니다.\n');
+        break;
+      }
+
       // 3~5개 강의마다 1~5분 휴식
       if ((completedLectures % (Math.floor(Math.random() * 3) + 3)) === 0) {
         const breakTime = Math.floor(Math.random() * 240000) + 60000; // 1~5분
@@ -204,45 +259,55 @@ const aiProvider = require('./aiProvider');
       console.log(`⚠️ 수료 퀴즈 처리 중 에러: ${err.message}`);
     }
 
-    // === 3단계: 최종 완료 검증 ===
-    console.log(`\n🔍 최종 검증을 위해 커리큘럼 페이지 접속: ${CURRICULUM_URL}`);
+    // === 3단계: 최종 수강률 검증 ===
+    console.log(`\n🔍 최종 수강률 검증을 위해 커리큘럼 페이지 접속: ${CURRICULUM_URL}`);
     await page.goto(CURRICULUM_URL, { waitUntil: 'networkidle2' });
     await randomDelay(2000, 5000);
 
-    const remainingUrls = await page.evaluate(
-      (itemSel, linkSel) => {
-        const urls = [];
-        const items = document.querySelectorAll(itemSel);
-        items.forEach(item => {
-          const actionTextEl = item.querySelector('.action-text');
-          if (!actionTextEl) return;
-          const text = actionTextEl.innerText.trim();
-          const isCompleted = actionTextEl.classList.contains('completed');
+    // 최종 수강률 확인
+    const finalRate = await getCurrentCompletionRate(page, CURRICULUM_URL);
+    console.log(`📊 최종 수강률: ${finalRate}% (목표: ${TARGET_RATE}%)`);
 
-          const progressEl = item.querySelector('.progress-text, .progress');
-          const progressText = progressEl ? progressEl.innerText.trim() : '';
-
-          if (!isCompleted && progressText !== '100%' && (text === '시작하기' || text === '이어하기' || text === '재도전')) {
-            const linkEl = item.querySelector(linkSel);
-            if (linkEl && linkEl.href) {
-              urls.push(linkEl.href);
-            }
-          }
-        });
-        return urls;
-      },
-      SELECTORS.LECTURE_ITEM,
-      SELECTORS.LECTURE_LINK,
-    );
-
-    if (remainingUrls.length === 0) {
-      console.log('✅ 완벽합니다! 모든 강의와 퀴즈가 성공적으로 수료 처리되었습니다.');
+    if (finalRate >= TARGET_RATE) {
+      console.log(`🎉 목표 수강률 ${TARGET_RATE}% 달성 성공! (현재: ${finalRate}%)`);
+      console.log('✅ 봇 실행이 완료되었습니다.');
     } else {
-      console.log(`⚠️ 검증 결과, 아직 미완료 처리된 항목이 ${remainingUrls.length}개 남아있습니다.`);
-      remainingUrls.forEach((url, idx) => {
-        console.log(`  - [${idx + 1}] ${url}`);
-      });
-      console.log('재실행을 통해 남은 항목들을 마저 수료할 수 있습니다.');
+      console.log(`⚠️ 목표 수강률 ${TARGET_RATE}% 미달성 (현재: ${finalRate}%)`);
+      console.log('재실행을 통해 남은 강의를 수료할 수 있습니다.');
+      
+      // 디버깅을 위해 남은 강의 목록도 표시
+      const remainingUrls = await page.evaluate(
+        (itemSel, linkSel) => {
+          const urls = [];
+          const items = document.querySelectorAll(itemSel);
+          items.forEach(item => {
+            const actionTextEl = item.querySelector('.action-text');
+            if (!actionTextEl) return;
+            const text = actionTextEl.innerText.trim();
+            const isCompleted = actionTextEl.classList.contains('completed');
+
+            const progressEl = item.querySelector('.progress-text, .progress');
+            const progressText = progressEl ? progressEl.innerText.trim() : '';
+
+            if (!isCompleted && progressText !== '100%' && (text === '시작하기' || text === '이어하기' || text === '재도전')) {
+              const linkEl = item.querySelector(linkSel);
+              if (linkEl && linkEl.href) {
+                urls.push(linkEl.href);
+              }
+            }
+          });
+          return urls;
+        },
+        SELECTORS.LECTURE_ITEM,
+        SELECTORS.LECTURE_LINK,
+      );
+      
+      if (remainingUrls.length > 0) {
+        console.log(`📚 남은 미완료 강의: ${remainingUrls.length}개`);
+        remainingUrls.forEach((url, idx) => {
+          console.log(`  - [${idx + 1}] ${url}`);
+        });
+      }
     }
 
   } catch (error) {
