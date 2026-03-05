@@ -119,16 +119,51 @@ async function ensureLoggedIn(page, email, password) {
     await humanType(page, email);
     await randomDelay(500, 1000);
     
-    // 비밀번호 입력 필드 찾기
-    await page.waitForSelector('input[type="password"], input[name="password"], #password', { timeout: 5000 });
+    // Tab 키로 비밀번호 필드로 이동
+    await page.keyboard.press('Tab');
+    await randomDelay(300, 700);
+    
+    // 비밀번호 입력 필드에 포커스가 있는지 확인
+    const isPasswordFocused = await page.evaluate(() => {
+      const activeEl = document.activeElement;
+      return activeEl && (
+        activeEl.type === 'password' || 
+        activeEl.name === 'password' || 
+        activeEl.id === 'password'
+      );
+    });
+    
+    if (!isPasswordFocused) {
+      logger.warn('⚠️ Tab 키로 비밀번호 필드로 이동 실패, 직접 클릭 시도');
+      const passwordInput = await page.$('input[type="password"], input[name="password"], #password');
+      if (passwordInput) {
+        await passwordInput.click();
+        await randomDelay(300, 500);
+      }
+    }
+    
+    // 비밀번호 입력
     await humanType(page, password);
     await randomDelay(500, 1000);
     
-    // 로그인 버튼 찾기 및 클릭
-    const loginBtn = await page.$('button[type="submit"], .login-button, .btn-primary');
-    if (loginBtn) {
-      await loginBtn.click();
-      logger.info('🖱️ 로그인 버튼 클릭');
+    // 로그인 버튼 찾기 및 클릭 (JavaScript로 직접 클릭하여 클릭 가능성 문제 해결)
+    const loginClicked = await page.evaluate(() => {
+      // 모든 버튼 중에서 Login 텍스트가 있는 버튼 찾기
+      const buttons = Array.from(document.querySelectorAll('button, input[type="submit"]'));
+      const loginButton = buttons.find(btn => {
+        const text = btn.innerText?.trim() || btn.value?.trim() || '';
+        return text === 'Login' || text === '로그인';
+      });
+      
+      if (loginButton) {
+        loginButton.click();
+        return true;
+      }
+      return false;
+    });
+    
+    if (loginClicked) {
+      logger.info('🖱️ 로그인 버튼 클릭 (JavaScript)');
     } else {
       // 버튼을 찾지 못하면 Enter 키 입력
       await page.keyboard.press('Enter');
