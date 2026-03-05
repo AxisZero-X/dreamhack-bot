@@ -1,0 +1,40 @@
+<div class="quiz-question" data-v-743293eb="" data-v-e23d0ac8=""><div class="question-main is-wrong" data-v-743293eb=""><div class="question-header" data-v-743293eb=""><div class="content" data-v-743293eb="">
+        Q1. 아래 코드를 컴파일 했을 때, 컴파일된 어셈블리 코드 중 (a)에 들어갈 것으로 가장 적절할 것을 고르시오.
+      </div></div> <div class="question-markdown markdown-content" data-v-743293eb=""><div class="hljs-dreamhack-quiz" data-v-743293eb=""><pre><code class="hljs language-c"><span class="hljs-comment">// Name: callconv_quiz.c</span>
+<span class="hljs-comment">// Compile: gcc -o callconv_quiz callconv_quiz.c -m32</span>
+<span class="hljs-type">int</span> __attribute__((cdecl)) sum(<span class="hljs-type">int</span> a1, <span class="hljs-type">int</span> a2, <span class="hljs-type">int</span> a3){
+	<span class="hljs-keyword">return</span> a1 + a2 + a3;
+}
+<span class="hljs-type">void</span> <span class="hljs-title function_">main</span><span class="hljs-params">()</span>{
+	<span class="hljs-type">int</span> total = <span class="hljs-number">0</span>;
+	total = sum(<span class="hljs-number">1</span>, <span class="hljs-number">2</span>, <span class="hljs-number">3</span>);
+}
+</code></pre>
+<pre><code class="hljs"><span class="hljs-symbol">main:</span>   
+   <span class="hljs-number">0x080483ed</span> &lt;+<span class="hljs-number">0</span>&gt;:	<span class="hljs-keyword">push</span>   <span class="hljs-built_in">ebp</span>
+   <span class="hljs-number">0x080483ee</span> &lt;+<span class="hljs-number">1</span>&gt;:	<span class="hljs-keyword">mov</span>    <span class="hljs-built_in">ebp</span>,<span class="hljs-built_in">esp</span>
+   <span class="hljs-number">0x080483f0</span> &lt;+<span class="hljs-number">3</span>&gt;:	<span class="hljs-keyword">sub</span>    <span class="hljs-built_in">esp</span>,<span class="hljs-number">0x10</span>
+   <span class="hljs-number">0x080483f3</span> &lt;+<span class="hljs-number">6</span>&gt;:	<span class="hljs-keyword">mov</span>    <span class="hljs-built_in">DWORD</span> <span class="hljs-built_in">PTR</span> [<span class="hljs-built_in">ebp</span>-<span class="hljs-number">0x4</span>],<span class="hljs-number">0x0</span>
+   <span class="hljs-number">0x080483fa</span> &lt;+<span class="hljs-number">13</span>&gt;:	(a)
+   <span class="hljs-number">0x080483fc</span> &lt;+<span class="hljs-number">15</span>&gt;:	(b)
+   <span class="hljs-number">0x080483fe</span> &lt;+<span class="hljs-number">17</span>&gt;:	(c)
+   <span class="hljs-number">0x08048400</span> &lt;+<span class="hljs-number">19</span>&gt;:	<span class="hljs-keyword">call</span>   <span class="hljs-number">0x80483db</span> &lt;sum&gt;
+   <span class="hljs-number">0x08048405</span> &lt;+<span class="hljs-number">24</span>&gt;:	(d)
+   <span class="hljs-number">0x08048408</span> &lt;+<span class="hljs-number">27</span>&gt;:	<span class="hljs-keyword">mov</span>    <span class="hljs-built_in">DWORD</span> <span class="hljs-built_in">PTR</span> [<span class="hljs-built_in">ebp</span>-<span class="hljs-number">0x4</span>],<span class="hljs-built_in">eax</span>
+   <span class="hljs-number">0x0804840b</span> &lt;+<span class="hljs-number">30</span>&gt;:	<span class="hljs-keyword">nop</span>
+   <span class="hljs-number">0x0804840c</span> &lt;+<span class="hljs-number">31</span>&gt;:	<span class="hljs-keyword">leave</span>  
+   <span class="hljs-number">0x0804840d</span> &lt;+<span class="hljs-number">32</span>&gt;:	<span class="hljs-keyword">ret</span> 
+</code></pre>
+</div></div> <div class="section-question-choices" data-v-743293eb=""><div class="caption" data-v-743293eb="">
+            아쉽게도 틀렸습니다. 다시 도전해보세요.
+          </div> <div class="question-choices" data-v-743293eb=""><div class="choice" data-v-743293eb=""><!---->
+          push 0x1
+        </div><div class="choice" data-v-743293eb=""><!---->
+          push 0x2
+        </div><div class="choice" data-v-743293eb=""><!---->
+          push 0x3
+        </div><div class="choice selected is-wrong" data-v-743293eb=""><img data-v-743293eb="" src="https://static.dreamhack.io/learn/v2/img/wrong.9283a22.svg" class="icon">
+          push 0x4
+        </div></div></div></div> <div class="actions" data-v-743293eb=""><button type="button" class="btn btn-primary" data-v-743293eb="">
+        재도전
+      </button></div></div>

@@ -1,9 +1,27 @@
 const { createCursor } = require('ghost-cursor');
-const { CURRICULUM_URL, EXAM_URL, DELAY, SELECTORS } = require('./config');
+const { EXAM_URL, DELAY, SELECTORS } = require('./config');
 const { launchBrowser, ensureLoggedIn, randomDelay, randomScroll, humanType, getDynamicDelay } = require('./utils');
 const { searchFlagForWargame } = require('./search');
 const aiProvider = require('./aiProvider');
 const readline = require('readline');
+
+/**
+ * 커리큘럼 ID 입력 프롬프트
+ */
+async function askCurriculumId() {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+  
+  return new Promise((resolve) => {
+    rl.question('📚 커리큘럼 ID를 입력하세요 (예: 920, Enter=916): ', (answer) => {
+      rl.close();
+      const id = parseInt(answer.trim()) || 916;
+      resolve(id);
+    });
+  });
+}
 
 /**
  * 목표 수강률 입력 프롬프트
@@ -20,6 +38,25 @@ async function askTargetRate() {
       const rate = parseInt(answer.trim()) || 100;
       const validRate = Math.min(100, Math.max(1, rate));
       resolve(validRate);
+    });
+  });
+}
+
+/**
+ * 드림핵 로그인 정보 입력 프롬프트
+ */
+async function askCredentials() {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+  
+  return new Promise((resolve) => {
+    rl.question('📧 드림핵 이메일을 입력하세요: ', (email) => {
+      rl.question('🔐 비밀번호를 입력하세요: ', { mask: '*' }, (password) => {
+        rl.close();
+        resolve({ email: email.trim(), password: password.trim() });
+      });
     });
   });
 }
@@ -48,9 +85,19 @@ async function getCurrentCompletionRate(page, curriculumUrl) {
 (async () => {
   console.log('🚀 드림핵 자동 수강 봇 시작...\n');
   
+  // 📚 커리큘럼 ID 입력 받기
+  const CURRICULUM_ID = await askCurriculumId();
+  const CURRICULUM_URL = `https://dreamhack.io/euser/curriculums/${CURRICULUM_ID}`;
+  console.log(`✅ 커리큘럼 URL: ${CURRICULUM_URL}\n`);
+  
   // 🎯 목표 수강률 입력 받기
   const TARGET_RATE = await askTargetRate();
   console.log(`✅ 목표 수강률: ${TARGET_RATE}%\n`);
+  
+  // 📧 로그인 정보 입력 받기
+  const { email, password } = await askCredentials();
+  console.log(`✅ 로그인 정보 입력 완료 (이메일: ${email})\n`);
+  
   console.log('🛡️  Anomaly Detection 우회 모드 활성화 (Priority 3 적용)\n');
 
   const browser = await launchBrowser();
@@ -59,7 +106,7 @@ async function getCurrentCompletionRate(page, curriculumUrl) {
 
   try {
     // === 0단계: 로그인 확인 ===
-    await ensureLoggedIn(page);
+    await ensureLoggedIn(page, email, password);
 
     // === 1단계: 커리큘럼에서 미완료 강의 추출 ===
     console.log(`🔍 커리큘럼 페이지 접속: ${CURRICULUM_URL}`);

@@ -91,9 +91,9 @@ async function launchBrowser() {
 }
 
 /**
- * 로그인 상태 확인 + 미로그인 시 대기
+ * 로그인 상태 확인 + 미로그인 시 자동 로그인 시도
  */
-async function ensureLoggedIn(page) {
+async function ensureLoggedIn(page, email, password) {
   await safeGoto(page, 'https://dreamhack.io', { waitUntil: 'networkidle2' });
 
   const isLoggedIn = await page.evaluate(() => {
@@ -109,12 +109,51 @@ async function ensureLoggedIn(page) {
     return;
   }
 
-  // 로그인 페이지로 이동
+  // 자동 로그인 시도
+  logger.info('🔑 자동 로그인 시도 중...');
+  await safeGoto(page, 'https://dreamhack.io/users/login', { waitUntil: 'networkidle2' });
+  
+  try {
+    // 이메일 입력 필드 찾기
+    await page.waitForSelector('input[type="email"], input[name="email"], #email', { timeout: 5000 });
+    await humanType(page, email);
+    await randomDelay(500, 1000);
+    
+    // 비밀번호 입력 필드 찾기
+    await page.waitForSelector('input[type="password"], input[name="password"], #password', { timeout: 5000 });
+    await humanType(page, password);
+    await randomDelay(500, 1000);
+    
+    // 로그인 버튼 찾기 및 클릭
+    const loginBtn = await page.$('button[type="submit"], .login-button, .btn-primary');
+    if (loginBtn) {
+      await loginBtn.click();
+      logger.info('🖱️ 로그인 버튼 클릭');
+    } else {
+      // 버튼을 찾지 못하면 Enter 키 입력
+      await page.keyboard.press('Enter');
+      logger.info('⌨️ Enter 키로 로그인 시도');
+    }
+    
+    // 로그인 성공 대기 (최대 30초)
+    await page.waitForFunction(() => {
+      const icon = document.querySelector('.user-icon');
+      if (!icon) return false;
+      const text = icon.innerText?.trim();
+      return text.length > 0 && !text.includes('로그인');
+    }, { timeout: 30000 });
+    
+    logger.info('✅ 자동 로그인 성공!');
+    return;
+  } catch (error) {
+    logger.warn(`⚠️ 자동 로그인 실패: ${error.message}`);
+    logger.info('📌 수동 로그인 대기 모드로 전환합니다...');
+  }
+
+  // 자동 로그인 실패 시 수동 로그인 대기
   logger.warn('⚠️  로그인이 필요합니다!');
   logger.info('📌 열린 Chrome 창에서 드림핵에 로그인해주세요.');
   logger.info('⏳ 로그인 완료 대기 중...');
-
-  await safeGoto(page, 'https://dreamhack.io/users/login', { waitUntil: 'networkidle2' });
 
   // 로그인 완료까지 폴링 (최대 5분)
   for (let i = 0; i < 60; i++) {

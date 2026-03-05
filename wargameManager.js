@@ -1,9 +1,7 @@
 const { randomDelay } = require('./utils');
 const { searchFlagForWargame } = require('./search');
-const Anthropic = require('@anthropic-ai/sdk');
+const aiProvider = require('./aiProvider');
 const logger = require('./logger');
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 /**
  * 워게임 챌린지 풀이 시도
@@ -107,20 +105,12 @@ async function solveWargameChallenge(browser, page, url, togetherPracticeMap = {
           flag = realFlags[realFlags.length - 1]; // 마지막(최종) 플래그 사용
           logger.info(`🎯 [함께실습] 강의에서 플래그 직접 발견: ${flag}`);
         } else {
-          // Claude에게 분석 요청: 플래그 직접 추출 or 힌트 조합 or 이름 기반 추론
-          logger.info(`🤖 Claude에게 [함께실습] 강의 분석 요청 중...`);
+          // AI에게 분석 요청: 플래그 직접 추출 or 힌트 조합 or 이름 기반 추론
+          logger.info(`🤖 AI에게 [함께실습] 강의 분석 요청 중...`);
           try {
             const wargameProblemText = await page.evaluate(() => document.body.innerText.trim().substring(0, 3000));
-
-            const msg = await anthropic.messages.create({
-              model: 'gemini-3-flash', // Note: anthropic SDK is being used with gemini model name in previous script, keep as is or adjust to claude
-              max_tokens: 256,
-              messages: [
-                {
-                  role: 'user',
-                  content: `당신은 드림핵(Dreamhack) 워게임 문제 풀이 전문가입니다.
-
-아래는 워게임 문제 "[${title}]"의 설명입니다:
+            const systemPrompt = "당신은 드림핵(Dreamhack) 워게임 문제 풀이 전문가입니다.";
+            const aiPrompt = `아래는 워게임 문제 "[${title}]"의 설명입니다:
 ${wargameProblemText.substring(0, 1500)}
 
 아래는 이 문제와 연관된 [함께실습] 강의의 전체 내용입니다:
@@ -131,21 +121,18 @@ ${lectureText.substring(0, 6000)}
 - 플래그가 직접 없고 힌트(특정 값, 연산 결과 등)만 있다면, 그 힌트로부터 최종 플래그를 계산/조합
 - 강의 내용에서도 찾기 어렵다면, 문제 제목과 설명을 토대로 가장 그럴듯한 플래그를 추론
 
-응답 형식: 플래그 문자열만 출력 (예: DH{some_flag_here}). 확신이 없으면 "모름"이라고만 출력.`,
-                },
-              ],
-            });
+응답 형식: 플래그 문자열만 출력 (예: DH{some_flag_here}). 확신이 없으면 "모름"이라고만 출력.`;
 
-            const claudeAnswer = msg.content[0].text.trim();
-            logger.info(`🤖 Claude 응답: ${claudeAnswer}`);
+            const aiAnswer = await aiProvider.getCompletion(aiPrompt, systemPrompt);
+            logger.info(`🤖 AI 응답: ${aiAnswer}`);
 
-            const claudeFlag = claudeAnswer.match(/DH\{[^}]+\}/)?.[0];
-            if (claudeFlag) {
-              flag = claudeFlag;
-              logger.info(`🎯 Claude가 플래그를 추론/추출: ${flag}`);
+            const aiFlag = aiAnswer.match(/DH\{[^}]+\}/)?.[0];
+            if (aiFlag) {
+              flag = aiFlag;
+              logger.info(`🎯 AI가 플래그를 추론/추출: ${flag}`);
             }
           } catch (err) {
-            logger.error(`⚠️ Claude API 호출 실패: ${err.message}`);
+            logger.error(`⚠️ AI API 호출 실패: ${err.message}`);
           }
         }
       } catch (err) {
@@ -162,33 +149,25 @@ ${lectureText.substring(0, 6000)}
       logger.info(`🔍 검색용 새 탭을 닫았습니다.`);
     }
 
-    // === 3단계: Claude에게 문제 설명만으로 최후 추론 요청 ===
+    // === 3단계: AI에게 문제 설명만으로 최후 추론 요청 ===
     if (!flag) {
       try {
-        logger.info(`🤖 Claude에게 문제 설명 기반 추론 요청 중...`);
+        logger.info(`🤖 AI에게 문제 설명 기반 추론 요청 중...`);
         await page.bringToFront();
         const problemText = await page.evaluate(() => document.body.innerText.trim().substring(0, 3000));
-        const msg = await anthropic.messages.create({
-          model: 'gemini-3-flash', // Note: keep matching original script model param
-          max_tokens: 128,
-          messages: [
-            {
-              role: 'user',
-              content: `드림핵 워게임 문제 "[${title}]"입니다. 문제 설명:
+        const aiPrompt = `드림핵 워게임 문제 "[${title}]"입니다. 문제 설명:
 ${problemText}
 
-이 문제의 DH{...} 형식 플래그를 추론해주세요. 확신이 없으면 "모름"이라고만 출력.`,
-            },
-          ],
-        });
-        const claudeAnswer = msg.content[0].text.trim();
-        const claudeFlag = claudeAnswer.match(/DH\{[^}]+\}/)?.[0];
-        if (claudeFlag) {
-          flag = claudeFlag;
-          logger.info(`🤖 Claude 최후 추론 플래그: ${flag}`);
+이 문제의 DH{...} 형식 플래그를 추론해주세요. 확신이 없으면 "모름"이라고만 출력.`;
+
+        const aiAnswer = await aiProvider.getCompletion(aiPrompt);
+        const aiFlag = aiAnswer.match(/DH\{[^}]+\}/)?.[0];
+        if (aiFlag) {
+          flag = aiFlag;
+          logger.info(`🤖 AI 최후 추론 플래그: ${flag}`);
         }
       } catch (err) {
-        logger.error(`⚠️ Claude 최후 추론 실패: ${err.message}`);
+        logger.error(`⚠️ AI 최후 추론 실패: ${err.message}`);
       }
     }
 

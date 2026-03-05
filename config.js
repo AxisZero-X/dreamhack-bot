@@ -4,7 +4,7 @@ require('dotenv').config();
 const CHROME_PATH = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
 // --- 타겟 설정 ---
-const CURRICULUM_URL = process.env.CURRICULUM_URL || 'https://dreamhack.io/euser/curriculums/916'; // 수강할 코스 커리큘럼 URL
+const CURRICULUM_URL = process.env.CURRICULUM_URL || 'https://dreamhack.io/euser/curriculums/916'; // 수강할 코스 커리큘럼 URL (bot.js에서 재정의됨)
 const EXAM_URL = process.env.EXAM_URL || null; // 수료 퀴즈 직접 URL (예: https://learn.dreamhack.io/exam/916)
 
 // --- 딜레이 설정 (밀리초) ---
