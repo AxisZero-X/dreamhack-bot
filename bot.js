@@ -1,11 +1,12 @@
 const { createCursor } = require('ghost-cursor');
 const { CURRICULUM_URL, EXAM_URL, DELAY, SELECTORS } = require('./config');
-const { launchBrowser, ensureLoggedIn, randomDelay, randomScroll, humanType } = require('./utils');
+const { launchBrowser, ensureLoggedIn, randomDelay, randomScroll, humanType, getDynamicDelay } = require('./utils');
 const { searchFlagForWargame } = require('./search');
 const aiProvider = require('./aiProvider');
 
 (async () => {
   console.log('🚀 드림핵 자동 수강 봇 시작...\n');
+  console.log('🛡️  Anomaly Detection 우회 모드 활성화 (Priority 3 적용)\n');
 
   const browser = await launchBrowser();
   const page = await browser.newPage();
@@ -39,12 +40,15 @@ const aiProvider = require('./aiProvider');
 
           // 미완료 강의 수집
           const actionTexts = Array.from(item.querySelectorAll('.action-text'));
+          const progressEl = item.querySelector('.progress-text, .progress');
+          const progressText = progressEl ? progressEl.innerText.trim() : '';
+
           const isIncomplete = actionTexts.some(el =>
             !el.classList.contains('completed') &&
-            (el.innerText.trim() === '시작하기' || el.innerText.trim() === '이어하기')
+            (el.innerText.trim() === '시작하기' || el.innerText.trim() === '이어하기' || el.innerText.trim() === '재도전')
           );
 
-          if (isIncomplete && link) {
+          if (isIncomplete && link && progressText !== '100%') {
             urls.push(link);
           }
         });
@@ -56,12 +60,24 @@ const aiProvider = require('./aiProvider');
 
     if (lectureUrls.length === 0) {
       console.log('✅ 모든 강의가 이미 완료되었습니다.');
+      return;
     } else {
       console.log(`📚 총 ${lectureUrls.length}개의 미완료 강의를 발견했습니다.`);
     }
 
+    // 세션 시간 제한 설정 (하루 최대 2.5시간)
+    const MAX_DAILY_MINUTES = 150; // 2.5시간
+    let totalMinutes = 0;
+    let completedLectures = 0;
+
     // === 2단계: 각 강의 순회 ===
     for (let i = 0; i < lectureUrls.length; i++) {
+      // 세션 시간 체크
+      if (totalMinutes >= MAX_DAILY_MINUTES) {
+        console.log(`⏰ 오늘 수강 시간 종료 (${totalMinutes}분). 내일 다시 실행하세요.`);
+        break;
+      }
+
       const url = lectureUrls[i];
       console.log(`\n▶️  [${i + 1}/${lectureUrls.length}] ${url}`);
 
@@ -69,6 +85,7 @@ const aiProvider = require('./aiProvider');
       if (url.includes('wargame/challenges')) {
         console.log('⚠️  워게임 챌린지 페이지가 감지되었습니다. [함께실습] 강의 및 인터넷 검색으로 플래그 해결을 시도합니다.');
         await solveWargameChallenge(browser, page, url, togetherPracticeMap);
+        totalMinutes += Math.floor(Math.random() * 5) + 3; // 3~8분 소요 추정
         continue;
       }
 
@@ -85,14 +102,19 @@ const aiProvider = require('./aiProvider');
           await randomDelay(500, 1000);
           unsolvedCount = await solveQuiz(page, cursor);
         }
+        await finishQuiz(page, cursor); // 퀴즈 최종 제출 및 다음 페이지 이동
+        totalMinutes += Math.floor(Math.random() * 8) + 5; // 퀴즈: 5~13분 소요 추정
       } else {
         // === 일반 강의 처리 ===
         let lectureCompleted = false;
 
         while (!lectureCompleted) {
-          console.log('📖 강의 내용 읽는 중... (스크롤 + 체류)');
+          // 난이도별 동적 딜레이 적용
+          const dynamicDelay = await getDynamicDelay(page);
+          console.log(`📖 강의 내용 읽는 중... (난이도: ${dynamicDelay.level}, ${Math.floor(dynamicDelay.min/1000)}~${Math.floor(dynamicDelay.max/1000)}초)`);
+          
           await Promise.all([
-            randomDelay(DELAY.PAGE_STAY_MIN, DELAY.PAGE_STAY_MAX),
+            randomDelay(dynamicDelay.min, dynamicDelay.max),
             randomScroll(page),
           ]);
 
@@ -126,9 +148,27 @@ const aiProvider = require('./aiProvider');
             console.log('➡️ 다음 페이지로 넘어갔습니다. 계속 진행합니다.');
           }
         }
+        
+        // 강의 소요 시간 추정 (난이도별)
+        const lectureTime = dynamicDelay.level === 'hard' ? 
+          Math.floor(Math.random() * 4) + 3 : // 3~7분
+          dynamicDelay.level === 'medium' ? 
+          Math.floor(Math.random() * 3) + 2 : // 2~5분
+          Math.floor(Math.random() * 2) + 1;  // 1~3분
+        totalMinutes += lectureTime;
       }
 
-      console.log(`✅ [${i + 1}] 완료`);
+      console.log(`✅ [${i + 1}] 완료 (누적: ${totalMinutes}분)`);
+      completedLectures++;
+
+      // 3~5개 강의마다 1~5분 휴식
+      if ((completedLectures % (Math.floor(Math.random() * 3) + 3)) === 0) {
+        const breakTime = Math.floor(Math.random() * 240000) + 60000; // 1~5분
+        const breakMinutes = Math.floor(breakTime / 60000);
+        console.log(`☕ 휴식 시간 (${breakMinutes}분)`);
+        await randomDelay(breakTime, breakTime + 30000);
+        totalMinutes += breakMinutes;
+      }
 
       // 다음 강의 전 자연스러운 대기
       if (i < lectureUrls.length - 1) {
@@ -155,7 +195,7 @@ const aiProvider = require('./aiProvider');
         await page.goto(resolvedExamUrl, { waitUntil: 'networkidle2' });
         await randomDelay(2000, 4000);
         await solveQuiz(page, cursor);
-        await finishExam(page, cursor); // 최종 제출 처리 추가
+        await finishQuiz(page, cursor); // 최종 제출 처리 추가
         console.log('✅ 수료 퀴즈 응시 완료');
       } else {
         console.log('⚠️ 수료 퀴즈 링크를 찾지 못했습니다. EXAM_URL을 .env에 설정하세요.');
@@ -174,9 +214,15 @@ const aiProvider = require('./aiProvider');
         const urls = [];
         const items = document.querySelectorAll(itemSel);
         items.forEach(item => {
-          const actionTexts = Array.from(item.querySelectorAll('.action-text'));
-          const hasStart = actionTexts.some(el => !el.classList.contains('completed') && el.innerText.trim() === '시작하기');
-          if (hasStart) {
+          const actionTextEl = item.querySelector('.action-text');
+          if (!actionTextEl) return;
+          const text = actionTextEl.innerText.trim();
+          const isCompleted = actionTextEl.classList.contains('completed');
+
+          const progressEl = item.querySelector('.progress-text, .progress');
+          const progressText = progressEl ? progressEl.innerText.trim() : '';
+
+          if (!isCompleted && progressText !== '100%' && (text === '시작하기' || text === '이어하기' || text === '재도전')) {
             const linkEl = item.querySelector(linkSel);
             if (linkEl && linkEl.href) {
               urls.push(linkEl.href);
@@ -268,10 +314,11 @@ async function solveQuiz(page, cursor) {
 
     // 해당 문제(qIndex)가 이미 완료(정답) 처리되었는지 확인
     const completionState = await page.evaluate((idx) => {
-      const nextKeywords = ['다음 문제', '다음', '완료', '계속', 'Next', 'Continue'];
+      const nextKeywords = ['다음 문제', '다음', '완료하기', '진행하기', '다음 주제로', '제출', '계속', 'Next', 'Continue'];
       const qs = Array.from(document.querySelectorAll('.quiz-question'));
       // 가시적인 문제를 우선 찾고, 없으면 인덱스로 접근
-      const q = qs.find(el => el.offsetWidth > 0 && el.offsetHeight > 0) || qs[idx] || qs[0];
+      const visibleQs = qs.filter(el => el.offsetParent !== null);
+          const q = visibleQs.length > 1 ? qs[idx] : (visibleQs[0] || qs[idx] || qs[0]);
       if (!q) return { isCompleted: false };
 
       // 결과 상태 확인을 위한 컨테이너들
@@ -294,7 +341,7 @@ async function solveQuiz(page, cursor) {
 
       // "다음 문제" 버튼 확인: 현재 문제 내부 또는 문제 외부(다른 문제에 속하지 않은 버튼)
       const btn = Array.from(document.querySelectorAll('.btn.btn-primary, .el-button--primary, .el-button--success')).find(b => {
-        if (!(b.offsetWidth > 0 || b.offsetHeight > 0) || !nextKeywords.some(k => b.innerText.includes(k))) return false;
+        if (!(b.offsetParent !== null) || !nextKeywords.some(k => b.innerText.includes(k))) return false;
         const parentQ = b.closest('.quiz-question');
         return !parentQ || parentQ === q;
       });
@@ -320,10 +367,11 @@ async function solveQuiz(page, cursor) {
     // 현재 문제의 보기 개수 수집
     const choiceCount = await page.evaluate((idx) => {
       const qs = Array.from(document.querySelectorAll('.quiz-question'));
-      const q = qs.find(el => el.offsetWidth > 0 && el.offsetHeight > 0) || qs[idx] || qs[0];
+      const visibleQs = qs.filter(el => el.offsetParent !== null);
+          const q = visibleQs.length > 1 ? qs[idx] : (visibleQs[0] || qs[idx] || qs[0]);
       if (!q) return 0;
       const choices = q.querySelectorAll('.choice');
-      return Array.from(choices).filter(el => (el.offsetWidth > 0 || el.offsetHeight > 0)).length;
+      return Array.from(choices).filter(el => (el.offsetParent !== null)).length;
     }, qIndex);
 
     console.log(`  🔘 보기 ${choiceCount}개 발견`);
@@ -331,7 +379,8 @@ async function solveQuiz(page, cursor) {
     // 문제 데이터 추출 (AI 프롬프트용)
     const questionData = await page.evaluate((idx) => {
       const qs = Array.from(document.querySelectorAll('.quiz-question'));
-      const q = qs.find(el => el.offsetWidth > 0 && el.offsetHeight > 0) || qs[idx] || qs[0];
+      const visibleQs = qs.filter(el => el.offsetParent !== null);
+          const q = visibleQs.length > 1 ? qs[idx] : (visibleQs[0] || qs[idx] || qs[0]);
       if (!q) return { questionText: '', isMulti: false };
 
       // .question-main, .question-markdown 등을 모두 고려
@@ -350,7 +399,8 @@ async function solveQuiz(page, cursor) {
       // 주관식(textarea) 처리
       const hasTextarea = await page.evaluate((idx) => {
         const qs = Array.from(document.querySelectorAll('.quiz-question'));
-        const q = qs.find(el => el.offsetWidth > 0 && el.offsetHeight > 0) || qs[idx] || qs[0];
+        const visibleQs = qs.filter(el => el.offsetParent !== null);
+          const q = visibleQs.length > 1 ? qs[idx] : (visibleQs[0] || qs[idx] || qs[0]);
         if (!q) return false;
         return q.querySelector('textarea') !== null;
       }, qIndex);
@@ -367,7 +417,8 @@ async function solveQuiz(page, cursor) {
         if (answer) {
           await page.evaluate((idx, ans) => {
             const qs = Array.from(document.querySelectorAll('.quiz-question'));
-            const q = qs.find(el => el.offsetWidth > 0 && el.offsetHeight > 0) || qs[idx] || qs[0];
+            const visibleQs = qs.filter(el => el.offsetParent !== null);
+          const q = visibleQs.length > 1 ? qs[idx] : (visibleQs[0] || qs[idx] || qs[0]);
             if (!q) return;
             const ta = q.querySelector('textarea');
             if (!ta) return;
@@ -381,12 +432,13 @@ async function solveQuiz(page, cursor) {
 
           await page.evaluate((idx) => {
             const qs = Array.from(document.querySelectorAll('.quiz-question'));
-            const q = qs.find(el => el.offsetWidth > 0 && el.offsetHeight > 0) || qs[idx] || qs[0];
+            const visibleQs = qs.filter(el => el.offsetParent !== null);
+          const q = visibleQs.length > 1 ? qs[idx] : (visibleQs[0] || qs[idx] || qs[0]);
             if (!q) return;
             // 현재 문제 내부 또는 문제 외부(다른 문제에 속하지 않은 버튼) 검색
             const confirmKeywords = ['확인', '제출', 'Confirm', 'Submit'];
             const btn = Array.from(document.querySelectorAll('.btn.btn-primary, .el-button--primary, .el-button--success')).find(b => {
-              if (!(b.offsetWidth > 0 || b.offsetHeight > 0) || !confirmKeywords.some(k => b.innerText.includes(k))) return false;
+              if (!(b.offsetParent !== null) || !confirmKeywords.some(k => b.innerText.includes(k))) return false;
               const parentQ = b.closest('.quiz-question');
               return !parentQ || parentQ === q;
             });
@@ -406,16 +458,18 @@ async function solveQuiz(page, cursor) {
 
     let solved = false;
     let attempts = 0;
+    const triedTexts = new Set();
     const MAX_ATTEMPTS = 15;
 
     // 현재 보기 텍스트 목록 읽기 (셔플 후 매번 호출)
     const getChoiceTexts = async () => {
       return page.evaluate((idx) => {
         const qs = Array.from(document.querySelectorAll('.quiz-question'));
-        const q = qs.find(el => el.offsetWidth > 0 && el.offsetHeight > 0) || qs[idx] || qs[0];
+        const visibleQs = qs.filter(el => el.offsetParent !== null);
+          const q = visibleQs.length > 1 ? qs[idx] : (visibleQs[0] || qs[idx] || qs[0]);
         if (!q) return [];
         return Array.from(q.querySelectorAll('.choice'))
-          .filter(el => (el.offsetWidth > 0 || el.offsetHeight > 0))
+          .filter(el => (el.offsetParent !== null))
           .map(el => el.innerText.trim());
       }, qIndex);
     };
@@ -426,10 +480,11 @@ async function solveQuiz(page, cursor) {
       for (const text of texts) {
         const handle = await page.evaluateHandle((idx, t) => {
           const qs = Array.from(document.querySelectorAll('.quiz-question'));
-          const q = qs.find(el => el.offsetWidth > 0 && el.offsetHeight > 0) || qs[idx] || qs[0];
+          const visibleQs = qs.filter(el => el.offsetParent !== null);
+          const q = visibleQs.length > 1 ? qs[idx] : (visibleQs[0] || qs[idx] || qs[0]);
           if (!q) return null;
           const choices = Array.from(q.querySelectorAll('.choice'))
-            .filter(el => (el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0));
+            .filter(el => (el.offsetParent !== null));
           return choices.find(el => el.innerText.trim() === t) || null;
         }, qIndex, text);
 
@@ -440,8 +495,20 @@ async function solveQuiz(page, cursor) {
         }
 
         try {
-          await el.scrollIntoViewIfNeeded();
-          await el.click(); // 네이티브 클릭으로 Vue.js 이벤트 트리거
+          // 마우스 움직임 다양화
+          await cursor.moveTo({ 
+            x: Math.random() * 50 - 25, 
+            y: Math.random() * 50 - 25 
+          });
+          await randomDelay(100, 300);
+          
+          await page.evaluate(e => { 
+            e.scrollIntoView({block: 'center', behavior: 'smooth'}); 
+          }, el);
+          
+          // 약간의 무작위 딜레이 후 클릭
+          await randomDelay(200, 400);
+          await page.evaluate(e => { e.click(); }, el);
           await randomDelay(300, 500);
         } catch (err) {
           console.log(`  ⚠️ 보기 클릭 실패: ${err.message}`);
@@ -457,16 +524,19 @@ async function solveQuiz(page, cursor) {
         await page.waitForFunction(
           (idx) => {
             const qs = Array.from(document.querySelectorAll('.quiz-question'));
-            const q = qs.find(el => el.offsetWidth > 0 && el.offsetHeight > 0) || qs[idx] || qs[0];
+            const visibleQs = qs.filter(el => el.offsetParent !== null);
+          const q = visibleQs.length > 1 ? qs[idx] : (visibleQs[0] || qs[idx] || qs[0]);
             const allBtns = Array.from(document.querySelectorAll('.btn.btn-primary, .el-button--primary'))
-                                 .filter(b => (b.offsetWidth > 0 || b.offsetHeight > 0 || b.getClientRects().length > 0));
-            const qBtn = q ? q.querySelector('.btn.btn-primary, .el-button--primary') : null;
+                                 .filter(b => (b.offsetParent !== null));
+            const qBtn = q ? Array.from(q.querySelectorAll('.btn.btn-primary, .el-button--primary')).find(b => (b.offsetParent !== null)) : null;
             const globalBtn = allBtns.find(b => !b.closest('.quiz-question'));
             const b = qBtn || globalBtn;
+        if (b) console.log('  🔍 확인/제출 버튼 찾음: ' + b.innerText.trim());
 
             if (b && !b.classList.contains('is-disabled') && !b.classList.contains('disabled')) {
               const t = b.innerText.trim();
-              const isConfirm = !['재도전', '다음 문제', '다음', '계속', '완료', 'Next', 'Continue'].some(k => t.includes(k));
+              const isConfirm = !['재도전', '다시', '다음 문제', '다음', '계속', '완료', 'Next', 'Continue'].some(k => t.includes(k));
+              if (isConfirm) console.log('  🔍 버튼 활성화 상태 확인:', t);
               return isConfirm;
             }
             return false;
@@ -477,22 +547,24 @@ async function solveQuiz(page, cursor) {
 
       const submitted = await page.evaluate((idx) => {
         const qs = Array.from(document.querySelectorAll('.quiz-question'));
-        const q = qs.find(el => el.offsetWidth > 0 && el.offsetHeight > 0) || qs[idx] || qs[0];
+        const visibleQs = qs.filter(el => el.offsetParent !== null);
+          const q = visibleQs.length > 1 ? qs[idx] : (visibleQs[0] || qs[idx] || qs[0]);
         const allBtns = Array.from(document.querySelectorAll('.btn.btn-primary, .el-button--primary'))
-                             .filter(b => (b.offsetWidth > 0 || b.offsetHeight > 0 || b.getClientRects().length > 0));
+                             .filter(b => (b.offsetParent !== null));
 
         // 현재 문제 컨테이너 안의 버튼 우선, 없으면 전역 버튼 중 현재 문제와 연관된 것 탐색
-        const qBtn = q ? q.querySelector('.btn.btn-primary, .el-button--primary') : null;
+        const qBtn = q ? Array.from(q.querySelectorAll('.btn.btn-primary, .el-button--primary')).find(b => (b.offsetParent !== null)) : null;
         const globalBtn = allBtns.find(b => {
           const parent = b.closest('.quiz-question');
           return !parent || parent === q;
         });
         const b = qBtn || globalBtn;
+        if (b) console.log('  🔍 확인/제출 버튼 찾음: ' + b.innerText.trim());
 
         if (!b || b.classList.contains('disabled') || b.classList.contains('is-disabled')) return false;
 
         const t = b.innerText.trim();
-        const nextKeywords = ['재도전', '다음 문제', '다음', '계속', '완료', 'Next', 'Continue'];
+        const nextKeywords = ['재도전', '다시', '다음 문제', '다음', '계속', '완료', 'Next', 'Continue'];
         if (nextKeywords.some(k => t.includes(k))) return false;
 
         b.scrollIntoView({ block: 'center' });
@@ -507,14 +579,15 @@ async function solveQuiz(page, cursor) {
           await page.waitForFunction(
             (idx) => {
               const qs = Array.from(document.querySelectorAll('.quiz-question'));
-              const q = qs.find(el => el.offsetWidth > 0 && el.offsetHeight > 0) || qs[idx] || qs[0];
+              const visibleQs = qs.filter(el => el.offsetParent !== null);
+          const q = visibleQs.length > 1 ? qs[idx] : (visibleQs[0] || qs[idx] || qs[0]);
               if (!q) return true;
 
               const hasResultClass = q.querySelector('.is-correct, .is-wrong, .is-success, .is-error, .check-icon') ||
                                      q.classList.contains('is-correct') || q.classList.contains('is-wrong');
 
               const b = Array.from(document.querySelectorAll('.btn.btn-primary, .el-button--primary'))
-                             .filter(el => (el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0))
+                             .filter(el => (el.offsetParent !== null))
                              .find(el => {
                                const p = el.closest('.quiz-question');
                                return !p || p === q;
@@ -522,7 +595,7 @@ async function solveQuiz(page, cursor) {
 
               if (!b) return hasResultClass;
               const t = b.innerText.trim();
-              const hasNextOrRetry = ['재도전', '다음 문제', '다음', '계속', '완료', 'Next', 'Continue'].some(k => t.includes(k));
+              const hasNextOrRetry = ['재도전', '다시', '다음 문제', '다음', '계속', '완료', 'Next', 'Continue'].some(k => t.includes(k));
 
               return hasResultClass || hasNextOrRetry;
             },
@@ -544,7 +617,8 @@ async function solveQuiz(page, cursor) {
         await page.waitForFunction(
           (idx, correctTexts, nextKeys) => {
             const qs = Array.from(document.querySelectorAll('.quiz-question'));
-            const q = qs.find(el => el.offsetWidth > 0 && el.offsetHeight > 0) || qs[idx] || qs[0];
+            const visibleQs = qs.filter(el => el.offsetParent !== null);
+          const q = visibleQs.length > 1 ? qs[idx] : (visibleQs[0] || qs[idx] || qs[0]);
             if (!q) return true;
             const text = q.innerText || '';
 
@@ -557,7 +631,7 @@ async function solveQuiz(page, cursor) {
             if (main && (main.classList.contains('is-wrong') || main.classList.contains('is-incorrect') || main.classList.contains('is-danger'))) return true;
 
             // 3. 버튼 상태 감지 (재도전 또는 다음)
-            const allBtns = Array.from(document.querySelectorAll('.btn.btn-primary, .el-button--primary')).filter(b => (b.offsetWidth > 0 || b.offsetHeight > 0));
+            const allBtns = Array.from(document.querySelectorAll('.btn.btn-primary, .el-button--primary')).filter(b => (b.offsetParent !== null));
             const qBtns = allBtns.filter(b => b.closest('.quiz-question') === q);
             const globalBtns = allBtns.filter(b => !b.closest('.quiz-question'));
             const btns = [...qBtns, ...globalBtns];
@@ -582,11 +656,12 @@ async function solveQuiz(page, cursor) {
       // 최종 정답 여부 판별
       const evalResult = await page.evaluate((idx, correctTexts, nextKeys) => {
         const qs = Array.from(document.querySelectorAll('.quiz-question'));
-        const q = qs.find(el => el.offsetWidth > 0 && el.offsetHeight > 0) || qs[idx] || qs[0];
+        const visibleQs = qs.filter(el => el.offsetParent !== null);
+          const q = visibleQs.length > 1 ? qs[idx] : (visibleQs[0] || qs[idx] || qs[0]);
         if (!q) return { isCorrect: true };
 
         const allVisibleBtns = Array.from(document.querySelectorAll('.btn, .el-button, .el-button--primary, .el-button--success'))
-          .filter(b => (b.offsetWidth > 0 || b.offsetHeight > 0 || b.getClientRects().length > 0));
+          .filter(b => (b.offsetParent !== null));
 
         const qBtns = allVisibleBtns.filter(b => b.closest('.quiz-question') === q);
         const globalBtns = allVisibleBtns.filter(b => !b.closest('.quiz-question'));
@@ -600,7 +675,7 @@ async function solveQuiz(page, cursor) {
           innerBtns: allVisibleBtns.map(b => ({
             text: b.innerText.trim(),
             parent: b.closest('.quiz-question') === q ? 'current' : (b.closest('.quiz-question') ? 'other' : 'global'),
-            visible: b.offsetWidth > 0 || b.offsetHeight > 0
+            visible: b.offsetParent !== null
           })),
         };
 
@@ -624,6 +699,17 @@ async function solveQuiz(page, cursor) {
         // 다음 문제 버튼이 있으면 무조건 정답 상태로 간주
         const nextBtn = targetBtns.find(b => nextKeys.some(k => b.innerText.includes(k)));
         if (nextBtn) return { isCorrect: true, debug: debugInfo };
+        
+        // 전역 버튼 중에서 "다음" 버튼이 있는지 확인 (특히 step 기반 퀴즈에서 중요)
+        const globalNextBtn = allVisibleBtns.find(b => nextKeys.some(k => b.innerText.includes(k)));
+        if (globalNextBtn) return { isCorrect: true, debug: debugInfo };
+        
+        // 정답을 맞춘 후 선택지가 남아있어도, 확인 버튼이 사라지고 다음 문제 버튼이 생겼다면 정답
+        if (qBtns.length === 0 && globalNextBtn) return { isCorrect: true, debug: debugInfo };
+        
+        // 어떤 버튼이든 텍스트에 "다음"이 포함되어 있으면 무조건 정답
+        const anyNextBtn = allVisibleBtns.find(b => nextKeys.some(k => b.innerText.includes(k)));
+        if (anyNextBtn) return { isCorrect: true, debug: debugInfo };
 
         // 오답 상태 명시적 확인 (재도전 버튼이 있으면 오답)
         const retryBtn = targetBtns.find(b => b.innerText.includes('재도전') || b.innerText.includes('다시'));
@@ -639,7 +725,7 @@ async function solveQuiz(page, cursor) {
         if (isWrong) return { isCorrect: false, debug: debugInfo };
 
         // 보기도 없고 확인 버튼도 없으면 (다음 단계로 넘어감)
-        const hasVisibleChoices = Array.from(q.querySelectorAll('.choice')).some(el => el.offsetWidth > 0 || el.offsetHeight > 0);
+        const hasVisibleChoices = Array.from(q.querySelectorAll('.choice')).some(el => el.offsetParent !== null);
         const hasConfirmBtn = targetBtns.some(b => {
           const t = b.innerText.trim();
           const isActionBtn = t.includes('확인') || t.includes('제출') || t.includes('Confirm') || t.includes('Submit');
@@ -675,7 +761,8 @@ async function solveQuiz(page, cursor) {
       // 매 시도마다 최신 문제 데이터 추출
       const currentQuestionData = await page.evaluate((idx) => {
         const qs = Array.from(document.querySelectorAll('.quiz-question'));
-        const q = qs.find(el => el.offsetWidth > 0 && el.offsetHeight > 0) || qs[idx] || qs[0];
+        const visibleQs = qs.filter(el => el.offsetParent !== null);
+          const q = visibleQs.length > 1 ? qs[idx] : (visibleQs[0] || qs[idx] || qs[0]);
         if (!q) return null;
 
         // 문제 텍스트 추출 시 코드 블록 구조 보존 (.question-main, .question-markdown 등 모두 탐색)
@@ -699,7 +786,7 @@ async function solveQuiz(page, cursor) {
                    q.querySelector('.is-multiple') !== null ||
                    multiKeywords.some(k => finalContent.includes(k)),
           choices: Array.from(q.querySelectorAll('.choice'))
-            .filter(el => (el.offsetWidth > 0 || el.offsetHeight > 0))
+            .filter(el => (el.offsetParent !== null))
             .map(el => el.innerText.trim())
         };
       }, qIndex);
@@ -715,9 +802,11 @@ async function solveQuiz(page, cursor) {
       }
       lastQuestionText = currentQuestionData.questionText;
 
-      // 현재 보기에 대해 AI 예측 요청
-      const systemPrompt = "당신은 리버싱 및 x86-64, x86(32비트) 어셈블리 전문가입니다. 주어진 레지스터 상태와 메모리, 코드를 분석하여 정확한 결과값을 도출합니다.";
-      const prompt = `드림핵 보안 퀴즈 문제입니다. 다음 내용을 분석하여 정답 보기의 인덱스(0부터 시작)를 JSON 배열로만 출력하세요.
+      // AI 정답률 조절 (70% 확률로만 AI 사용)
+      let aiIndices = null;
+      if (Math.random() < 0.7) {
+        const systemPrompt = "당신은 리버싱 및 x86-64, x86(32비트) 어셈블리 전문가입니다. 주어진 레지스터 상태와 메모리, 코드를 분석하여 정확한 결과값을 도출합니다.";
+        const prompt = `드림핵 보안 퀴즈 문제입니다. 다음 내용을 분석하여 정답 보기의 인덱스(0부터 시작)를 JSON 배열로만 출력하세요.
 
 문제 유형: 어셈블리 코드 실행 추론 또는 보안 개념
 출력 형식: [2] 또는 [1, 3] (반드시 JSON 배열만 출력)
@@ -739,22 +828,50 @@ ${currentTexts.map((text, idx) => `[${idx}] ${text}`).join('\n')}
 
 JSON 배열만 출력, 다른 설명 생략.`;
 
-      let aiIndices = null;
-      try {
-        const raw = await aiProvider.getCompletion(prompt, systemPrompt);
-        if(!raw) throw new Error('Empty response from AI');
-        const parsed = JSON.parse(raw.match(/\[[\d,\s]+\]/)?.[0] || 'null');
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          aiIndices = parsed.filter(i => i >= 0 && i < currentTexts.length);
-          console.log(`  🤖 AI 예측: [${aiIndices.join(', ')}]`);
-        } else {
-          console.log(`  ⚠️ AI 응답 파싱 실패: ${raw}`);
+        try {
+          const raw = await aiProvider.getCompletion(prompt, systemPrompt);
+          if(!raw) throw new Error('Empty response from AI');
+          const parsed = JSON.parse(raw.match(/\[[\d,\s]+\]/)?.[0] || 'null');
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            aiIndices = parsed.filter(i => i >= 0 && i < currentTexts.length);
+            console.log(`  🤖 AI 예측: [${aiIndices.join(', ')}]`);
+          } else {
+            console.log(`  ⚠️ AI 응답 파싱 실패: ${raw}`);
+          }
+        } catch (err) {
+          console.log(`  ⚠️ AI 예측 에러: ${err.message}`);
         }
-      } catch (err) {
-        console.log(`  ⚠️ AI 예측 에러: ${err.message}`);
+      } else {
+        console.log(`  🤖 AI 사용 안함 (정답률 조절)`);
       }
 
-      // AI 예측 결과로 먼저 시도
+      // 의도적 오답 추가 (30% 확률)
+      if (Math.random() < 0.3 && currentTexts.length > 1) {
+        console.log(`  🎭 의도적 오답 시도 (30% 확률)`);
+        const wrongChoices = [...Array(currentTexts.length).keys()]
+          .filter(i => !aiIndices || !aiIndices.includes(i));
+        
+        if (wrongChoices.length > 0) {
+          const numWrong = Math.random() < 0.5 ? 1 : 2; // 1~2개 오답
+          const selectedWrong = [];
+          
+          for (let w = 0; w < numWrong && w < wrongChoices.length; w++) {
+            const wrongIdx = wrongChoices[Math.floor(Math.random() * wrongChoices.length)];
+            selectedWrong.push(wrongIdx);
+            console.log(`  🎭 의도적 오답: 보기 ${wrongIdx + 1}`);
+          }
+          
+          const wrongTexts = selectedWrong.map(i => currentTexts[i]);
+          await tryChoiceTexts(wrongTexts);
+          const retryRes = await clickRetry(page, cursor, qIndex);
+          if (retryRes === 'RELOAD_REQUIRED') {
+            continue;
+          }
+          await randomDelay(3000, 8000);
+        }
+      }
+
+      // AI 예측 결과로 시도
       if (aiIndices) {
         const aiTexts = aiIndices.map(i => currentTexts[i]).filter(Boolean);
         if (aiTexts.length === aiIndices.length) {
@@ -766,7 +883,11 @@ JSON 배열만 출력, 다른 설명 생략.`;
             break; // 해당 문제 해결 완료
           } else {
             console.log('  ❌ AI 오답. 브루트포스 전환...');
-            await clickRetry(page, cursor, qIndex);
+            const retryRes = await clickRetry(page, cursor, qIndex);
+            if (retryRes === 'RELOAD_REQUIRED') {
+              // AI 예측 실패 후 reload된 경우 다시 바깥 for/while 루프로 넘김
+              continue; 
+            }
           }
         }
       }
@@ -780,18 +901,21 @@ JSON 배열만 출력, 다른 설명 생략.`;
         continue; // 보기가 바뀌었으면 처음부터 다시 (while 루프)
       }
 
-      // 2) 브루트포스 (현재 고정된 텍스트 목록 기반)
-      const triedTexts = new Set();
       if (aiIndices) {
         const aiTexts = aiIndices.map(i => currentTexts[i]).filter(Boolean);
         if (aiTexts.length === aiIndices.length) {
-          triedTexts.add(JSON.stringify(aiTexts.slice().sort()));
+          if (typeof triedTexts !== 'undefined') {
+            triedTexts.add(JSON.stringify(aiTexts.slice().sort()));
+          }
         }
       }
 
-      // 단일 보기 순회
+      // 단일 보기 순회 (무작위 순서)
       let viewChanged = false;
-      for (let c = 0; c < currentTexts.length && !solved; c++) {
+      const shuffledIndices = [...Array(currentTexts.length).keys()]
+        .sort(() => Math.random() - 0.5);
+      
+      for (const c of shuffledIndices) {
         const text = currentTexts[c];
         const key = JSON.stringify([text]);
         if (triedTexts.has(key)) continue;
@@ -804,7 +928,11 @@ JSON 배열만 출력, 다른 설명 생략.`;
           await handleCorrect(page, cursor, qIndex);
         } else {
           console.log('  ❌ 오답.');
-          await clickRetry(page, cursor, qIndex);
+          const retryRes = await clickRetry(page, cursor, qIndex);
+          if (retryRes === 'RELOAD_REQUIRED') {
+            viewChanged = true;
+            break;
+          }
 
           // 오답 후 보기가 셔플되거나 재생성되었는지 확인
           const newTexts = await getChoiceTexts();
@@ -833,12 +961,17 @@ JSON 배열만 출력, 다른 설명 생략.`;
               solved = true;
               await handleCorrect(page, cursor, qIndex);
             } else {
-              await clickRetry(page, cursor, qIndex);
+              const retryRes = await clickRetry(page, cursor, qIndex);
+              if (retryRes === 'RELOAD_REQUIRED') {
+                viewChanged = true;
+                break;
+              }
 
               const nextData = await page.evaluate((idx) => {
                 const qs = Array.from(document.querySelectorAll('.quiz-question'));
-                const q = qs.find(el => el.offsetWidth > 0 && el.offsetHeight > 0) || qs[idx] || qs[0];
-                return q ? Array.from(q.querySelectorAll('.choice')).filter(el => (el.offsetWidth > 0 || el.offsetHeight > 0)).map(el => el.innerText.trim()) : [];
+                const visibleQs = qs.filter(el => el.offsetParent !== null);
+          const q = visibleQs.length > 1 ? qs[idx] : (visibleQs[0] || qs[idx] || qs[0]);
+                return q ? Array.from(q.querySelectorAll('.choice')).filter(el => (el.offsetParent !== null)).map(el => el.innerText.trim()) : [];
               }, qIndex);
               if (JSON.stringify(nextData) !== currentTextsKey) {
                 console.log('  🔄 보기가 재생성되었습니다. 복수선택 중단 및 재시도.');
@@ -869,12 +1002,17 @@ JSON 배열만 출력, 다른 설명 생략.`;
                 solved = true;
                 await handleCorrect(page, cursor, qIndex);
               } else {
-                await clickRetry(page, cursor, qIndex);
+                const retryRes = await clickRetry(page, cursor, qIndex);
+                if (retryRes === 'RELOAD_REQUIRED') {
+                  viewChanged = true;
+                  break;
+                }
 
                 const nextData = await page.evaluate((idx) => {
                   const qs = Array.from(document.querySelectorAll('.quiz-question'));
-                  const q = qs.find(el => el.offsetWidth > 0 && el.offsetHeight > 0) || qs[idx] || qs[0];
-                  return q ? Array.from(q.querySelectorAll('.choice')).filter(el => (el.offsetWidth > 0 || el.offsetHeight > 0)).map(el => el.innerText.trim()) : [];
+                  const visibleQs = qs.filter(el => el.offsetParent !== null);
+          const q = visibleQs.length > 1 ? qs[idx] : (visibleQs[0] || qs[idx] || qs[0]);
+                  return q ? Array.from(q.querySelectorAll('.choice')).filter(el => (el.offsetParent !== null)).map(el => el.innerText.trim()) : [];
                 }, qIndex);
                 if (JSON.stringify(nextData) !== currentTextsKey) {
                   console.log('  🔄 보기가 재생성되었습니다. 3중선택 중단 및 재시도.');
@@ -910,11 +1048,13 @@ JSON 배열만 출력, 다른 설명 생략.`;
  * 오답 후 재도전 버튼 클릭
  */
 async function clickRetry(page, cursor, qIndex) {
+  let isReloaded = false;
   const handle = await page.evaluateHandle((idx) => {
     const qs = Array.from(document.querySelectorAll('.quiz-question'));
-    const q = qs.find(el => el.offsetWidth > 0 && el.offsetHeight > 0) || qs[idx] || qs[0];
+    const visibleQs = qs.filter(el => el.offsetParent !== null);
+          const q = visibleQs.length > 1 ? qs[idx] : (visibleQs[0] || qs[idx] || qs[0]);
     const btn = Array.from(document.querySelectorAll('.btn.btn-primary, .el-button--primary')).find(b => {
-      if (!(b.offsetWidth > 0 || b.offsetHeight > 0) || !b.innerText.includes('재도전')) return false;
+      if (!(b.offsetParent !== null) || !(b.innerText.includes('재도전') || b.innerText.includes('다시'))) return false;
       const parentQ = b.closest('.quiz-question');
       return !parentQ || parentQ === q; // 현재 문제 내부 또는 전역 재도전 버튼
     });
@@ -923,14 +1063,14 @@ async function clickRetry(page, cursor, qIndex) {
   const el = handle.asElement();
   if (el) {
     console.log('  🔄 재도전 버튼 클릭');
-    await el.scrollIntoView();
-    await cursor.click(el);
+    await page.evaluate(b => { b.scrollIntoView({block: 'center'}); b.click(); }, el);
 
     // 재도전 클릭 후 오답/정답 상태 클래스가 사라질 때까지 대기
     try {
       await page.waitForFunction((idx) => {
         const qs = Array.from(document.querySelectorAll('.quiz-question'));
-        const q = qs.find(el => el.offsetWidth > 0 && el.offsetHeight > 0) || qs[idx] || qs[0];
+        const visibleQs = qs.filter(el => el.offsetParent !== null);
+          const q = visibleQs.length > 1 ? qs[idx] : (visibleQs[0] || qs[idx] || qs[0]);
         if (!q) return true;
         const main = q.querySelector('.question-main, .question-markdown, .markdown-content');
 
@@ -942,39 +1082,35 @@ async function clickRetry(page, cursor, qIndex) {
 
         // 버튼 텍스트가 "확인"으로 돌아왔는지도 체크하면 더 정확함
         const btn = Array.from(document.querySelectorAll('.btn.btn-primary, .el-button--primary')).find(b => {
-          if (!(b.offsetWidth > 0 || b.offsetHeight > 0)) return false;
+          if (!(b.offsetParent !== null)) return false;
           const parentQ = b.closest('.quiz-question');
           return (!parentQ || parentQ === q) && (b.innerText.includes('확인') || b.innerText.includes('제출'));
         });
 
         // "재도전" 버튼이 사라졌는지 확인
         const retryBtn = Array.from(document.querySelectorAll('.btn.btn-primary, .el-button--primary')).find(b => {
-          if (!(b.offsetWidth > 0 || b.offsetHeight > 0)) return false;
+          if (!(b.offsetParent !== null)) return false;
           const parentQ = b.closest('.quiz-question');
-          return (!parentQ || parentQ === q) && b.innerText.includes('재도전');
+          return (!parentQ || parentQ === q) && (b.innerText.includes('재도전') || b.innerText.includes('다시'));
         });
 
         return (!main || !hasResultClass) && !qHasResultClass && !anyChildHasResult && !retryBtn;
       }, { timeout: 6000, polling: 500 }, qIndex);
     } catch (e) {
-      console.log('  ⚠️ 재도전 후 상태 초기화 대기 타임아웃. 강제 초기화 및 추가 대기.');
-      await page.evaluate((idx) => {
-        const qs = Array.from(document.querySelectorAll('.quiz-question'));
-        const q = qs.find(el => el.offsetWidth > 0 && el.offsetHeight > 0) || qs[idx] || qs[0];
-        if (!q) return;
-        const resultClasses = ['is-wrong', 'is-incorrect', 'is-success', 'is-correct', 'is-danger', 'is-valid', 'is-invalid', 'has-error'];
-        const removeClasses = (el) => {
-          if (!el) return;
-          el.classList.remove(...resultClasses);
-          Array.from(el.querySelectorAll('*')).forEach(child => child.classList.remove(...resultClasses));
-        };
-        removeClasses(q);
-      }, qIndex);
-      await randomDelay(1000, 2000); // 강제 초기화 후 안정화 대기
+      console.log('  ⚠️ 재도전 버튼 타임아웃. 페이지를 강제로 새로고침하여 상태를 초기화합니다...');
+      await page.reload({ waitUntil: 'networkidle2' });
+      await page.waitForFunction(() => document.readyState === 'complete', {timeout: 10000}).catch(()=>null);
+      isReloaded = true;
     }
   }
   handle.dispose();
-  await randomDelay(800, 1500); // 상태 초기화 후 약간 더 긴 대기
+  
+  if (isReloaded) {
+      await randomDelay(2000, 3000); // 새로고침 후 대기
+      return 'RELOAD_REQUIRED';
+  } else {
+      await randomDelay(800, 1500); // 상태 초기화 후 약간 더 긴 대기
+  }
 }
 
 /**
@@ -984,19 +1120,19 @@ async function handleCorrect(page, cursor, qIndex, maxAttempts = 8) {
   const nextKeywords = ['다음 문제', '다음', '완료', '계속', 'Next', 'Continue'];
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    // 1. 일반적인 "다음" 버튼 찾기
+        // 1. 일반적인 "다음" 버튼 찾기
     const btnHandle = await page.evaluateHandle((idx, keywords) => {
       const qs = Array.from(document.querySelectorAll('.quiz-question'));
-      const q = qs.find(el => el.offsetWidth > 0 && el.offsetHeight > 0) || qs[idx] || qs[0] || document.querySelector('.quiz-question');
+      const q = qs.find(el => el.offsetParent !== null) || qs[idx] || qs[0] || document.querySelector('.quiz-question');
       const allBtns = Array.from(document.querySelectorAll('.btn.btn-primary, .el-button--primary, .el-button--success'))
-                           .filter(b => (b.offsetWidth > 0 || b.offsetHeight > 0 || b.getClientRects().length > 0));
+                           .filter(b => (b.offsetParent !== null));
 
       return allBtns.find(b => {
         const text = b.innerText.trim();
         if (!keywords.some(k => text.includes(k))) return false;
         if (b.classList.contains('is-disabled') || b.disabled) return false;
         const parentQ = b.closest('.quiz-question');
-        return !parentQ || parentQ === q;
+        return !parentQ || parentQ === q; // 전역 버튼이거나 현재 문제의 버튼인 경우
       });
     }, qIndex, nextKeywords);
 
@@ -1049,7 +1185,7 @@ async function isCurrentStepCompleted(page) {
  * 다음 스텝(문제) 클릭
  */
 async function clickNextStep(page, cursor, nextIndex) {
-  const steps = await page.$$(SELECTORS.QUIZ_STEP);
+  const steps = await page.$(SELECTORS.QUIZ_STEP);
   if (steps[nextIndex]) {
     await cursor.click(steps[nextIndex]);
     await randomDelay(500, 1000);
@@ -1064,13 +1200,13 @@ async function clickCompleteButton(page, cursor) {
     // 버튼이 나타날 때까지 최대 5초 대기
     await page.waitForFunction((sel) => {
       const btns = Array.from(document.querySelectorAll(sel));
-      const visibleBtns = btns.filter(b => (b.offsetWidth > 0 || b.offsetHeight > 0));
+      const visibleBtns = btns.filter(b => b.offsetParent !== null);
       return visibleBtns.some(btn => btn.innerText.includes('진행하기') || btn.innerText.includes('다음 주제로'));
     }, { timeout: 5000 }, SELECTORS.COMPLETE_BTN).catch(() => {});
 
     const btnText = await page.evaluate((sel) => {
       const btns = Array.from(document.querySelectorAll(sel));
-      const visibleBtns = btns.filter(b => (b.offsetWidth > 0 || b.offsetHeight > 0));
+      const visibleBtns = btns.filter(b => b.offsetParent !== null);
 
       // '진행하기' 버튼을 우선적으로 찾음
       let targetBtn = visibleBtns.find(btn => btn.innerText.includes('진행하기'));
@@ -1079,16 +1215,25 @@ async function clickCompleteButton(page, cursor) {
       if (!targetBtn) {
         targetBtn = visibleBtns.find(btn => btn.innerText.includes('다음 주제로'));
       }
+      
+      // 없으면 '목록으로' 버튼 찾음
+      if (!targetBtn) {
+        targetBtn = visibleBtns.find(btn => btn.innerText.includes('목록으로'));
+      }
 
       if (targetBtn) {
         targetBtn.click();
         return targetBtn.innerText.trim();
       }
-      return null;
+      
+      const allBtnTexts = visibleBtns.map(b => b.innerText.trim()).filter(t => t);
+      return { debugBtns: allBtnTexts };
     }, SELECTORS.COMPLETE_BTN);
 
-    if (btnText) {
+    if (btnText && typeof btnText === 'string') {
       console.log(`🖱️  [${btnText}] 버튼 클릭 완료`);
+    } else if (btnText && btnText.debugBtns) {
+      console.log('⚠️  수강 완료 버튼("진행하기"/"다음 주제로")을 찾지 못했습니다. 현재 보이는 버튼들:', btnText.debugBtns);
     } else {
       console.log('⚠️  수강 완료 버튼("진행하기"/"다음 주제로")을 찾지 못했습니다.');
     }
@@ -1113,10 +1258,10 @@ async function checkCompletionPopup(page, cursor) {
       console.log('🎉 축하합니다! 팝업 확인됨.');
 
       // '다음 목표로' 혹은 '커리큘럼으로' 버튼 클릭
-    const btnText = await page.evaluate(() => {
+      const btnText = await page.evaluate(() => {
         // 모든 잠재적 버튼/링크 요소 탐색
         const elements = Array.from(document.querySelectorAll('button, a, div[role="button"], .slot-wrapper'));
-        const visibleElements = elements.filter(el => (el.offsetWidth > 0 || el.offsetHeight > 0));
+        const visibleElements = elements.filter(el => el.offsetParent !== null);
 
         // '다음 목표로'를 최우선으로 찾음 (확실한 완료 처리)
         let targetBtn = visibleElements.find(el => el.innerText.includes('다음 목표로'));
@@ -1145,32 +1290,43 @@ async function checkCompletionPopup(page, cursor) {
 }
 
 /**
- * 수료 퀴즈(Exam) 최종 제출 처리
+ * 수료 퀴즈(Exam) 및 일반 퀴즈 최종 제출 처리
  */
-async function finishExam(page, cursor) {
-  console.log('🏁 수료 퀴즈 최종 제출을 시도합니다...');
-  await randomDelay(2000, 4000);
+async function finishQuiz(page, cursor) {
+  console.log('🏁 퀴즈/수료 퀴즈 최종 제출을 시도합니다...');
+  await randomDelay(3000, 5000);
 
   try {
     const btnText = await page.evaluate(() => {
-      const submitKeywords = ['제출', '완료', '결과', 'Finish', 'Submit', 'Done'];
-      const btns = Array.from(document.querySelectorAll('button, .btn, .el-button, .el-button--primary'));
-      const visibleBtns = btns.filter(b => (b.offsetWidth > 0 || b.offsetHeight > 0 || b.getClientRects().length > 0));
+      const submitKeywords = ['제출', '결과', 'Finish', 'Submit', 'Done', '채점', '완료'];
+      const btns = Array.from(document.querySelectorAll('button, a, .btn, .el-button'));
+      const visibleBtns = btns.filter(b => b.offsetParent !== null);
 
       const targetBtn = visibleBtns.find(btn =>
         submitKeywords.some(k => btn.innerText.includes(k)) &&
         !btn.innerText.includes('재도전') &&
-        !btn.innerText.includes('다음')
+        !btn.innerText.includes('다시') &&
+        !btn.innerText.includes('다음 문제') &&
+        !btn.innerText.includes('다음 주제로') &&
+        !btn.innerText.includes('진행하기')
       );
+      
+      if (!targetBtn) {
+        // Log all visible buttons to help debug
+        const allBtnTexts = visibleBtns.map(b => b.innerText.trim()).filter(t => t);
+        console.log("DEBUG_VISIBLE_BTNS:", JSON.stringify(allBtnTexts));
+      }
 
       if (targetBtn) {
         targetBtn.click();
         return targetBtn.innerText.trim();
       }
-      return null;
+      
+      const allBtnTexts = visibleBtns.map(b => b.innerText.trim()).filter(t => t);
+      return { debugBtns: allBtnTexts };
     });
 
-    if (btnText) {
+    if (btnText && typeof btnText === 'string') {
       console.log(`🖱️  최종 제출 버튼 [${btnText}] 클릭 완료`);
       await randomDelay(3000, 5000);
 
@@ -1180,6 +1336,8 @@ async function finishExam(page, cursor) {
         if (confirmBtn) confirmBtn.click();
       });
       await randomDelay(2000, 4000);
+    } else if (btnText && btnText.debugBtns) {
+      console.log('⚠️  최종 제출 버튼을 찾지 못했습니다. 현재 보이는 버튼들:', btnText.debugBtns);
     } else {
       console.log('⚠️  최종 제출 버튼을 찾지 못했습니다. 이미 제출되었거나 버튼 형식이 다를 수 있습니다.');
     }
@@ -1187,10 +1345,14 @@ async function finishExam(page, cursor) {
     // 최종 수료 팝업 확인
     const completed = await checkCompletionPopup(page, cursor);
     if (completed) {
-      console.log('🎉 수료 퀴즈가 성공적으로 처리되었습니다.');
+      console.log('🎉 퀴즈가 성공적으로 처리되었습니다.');
+    } else {
+      // 팝업이 안 떴다면 다음 주제로 / 진행하기 버튼 클릭 시도 (일반 퀴즈인 경우)
+      await clickCompleteButton(page, cursor);
+      await randomDelay(2000, 4000);
     }
   } catch (err) {
-    console.log('⚠️  수료 퀴즈 최종 제출 처리 중 에러:', err.message);
+    console.log('⚠️  퀴즈 최종 제출 처리 중 에러:', err.message);
   }
 }
 
@@ -1257,7 +1419,7 @@ async function solveWargameChallenge(browser, page, url, togetherPracticeMap = {
             const btns = Array.from(document.querySelectorAll('button'));
             const nextBtn = btns.find(b => {
               const t = b.innerText.trim();
-              return (t === '다음' || t === 'Next' || t.includes('다음')) && !b.disabled && (b.offsetWidth > 0 || b.offsetHeight > 0);
+              return (t === '다음' || t === 'Next' || t.includes('다음')) && !b.disabled && (b.offsetParent !== null);
             });
             if (nextBtn) { nextBtn.click(); return true; }
             return false;

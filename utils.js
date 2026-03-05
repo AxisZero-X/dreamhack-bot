@@ -72,7 +72,7 @@ async function launchBrowser() {
   const browser = await puppeteer.connect({
     browserWSEndpoint: wsUrl,
     defaultViewport: null,
-    protocolTimeout: 300000, // 5분으로 타임아웃 대폭 증가
+    protocolTimeout: 3000000, // 50분으로 타임아웃 대폭 증가
   });
 
   // cleanup 등록 (프로필은 유지 - 세션 보존)
@@ -147,10 +147,26 @@ function sleep(ms) {
 }
 
 /**
- * 무작위 대기
+ * 정규분포(가우시안) 난수 생성
+ */
+function gaussianRandom(mean, stdDev) {
+  let u1 = Math.random();
+  let u2 = Math.random();
+  let z0 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
+  return z0 * stdDev + mean;
+}
+
+/**
+ * 무작위 대기 (가우시안 분포 적용)
  */
 async function randomDelay(min, max) {
-  const delay = Math.floor(Math.random() * (max - min + 1)) + min;
+  // 가우시안 분포 사용 (중간값 근처에 집중)
+  const mean = (min + max) / 2;
+  const stdDev = (max - min) / 6; // 99.7%가 min~max 범위 내
+  let delay = Math.floor(gaussianRandom(mean, stdDev));
+  
+  // 범위 제한
+  delay = Math.max(min, Math.min(max, delay));
 
   if (process.env.TEST_MODE === '1') {
     return sleep(Math.min(delay, 500));
@@ -216,6 +232,64 @@ async function safeGoto(page, url, options = { waitUntil: 'networkidle2' }, maxR
   }
 }
 
+/**
+ * 강의 난이도 분석 및 동적 딜레이 계산
+ */
+async function getDynamicDelay(page) {
+  try {
+    const analysis = await page.evaluate(() => {
+      const bodyText = document.body.innerText;
+      const textLength = bodyText.length;
+      const codeBlocks = document.querySelectorAll('pre, code, .hljs').length;
+      const hasVideo = document.querySelector('video') !== null;
+      const title = document.querySelector('h1, .lecture-title, .quiz-title')?.innerText || '';
+      const hasQuiz = document.querySelector('.quiz-question, .quiz-title') !== null;
+      
+      return { 
+        textLength, 
+        codeBlocks, 
+        hasVideo, 
+        hasQuiz,
+        title, 
+        bodyText: bodyText.substring(0, 500) 
+      };
+    });
+    
+    let score = 0;
+    
+    // 키워드 분석
+    const hardKeywords = ['어셈블리', '리버싱', '익스플로잇', 'ROP', 'shellcode', 'heap', 'stack', 'pwnable', 'x86-64', 'gdb', '디버깅', '메모리'];
+    const easyKeywords = ['소개', '개요', '기초', '입문', '시작', '개념', '이란', '환경설정', '설치'];
+    const text = (analysis.title + ' ' + analysis.bodyText).toLowerCase();
+    
+    hardKeywords.forEach(k => { if (text.includes(k)) score += 2; });
+    easyKeywords.forEach(k => { if (text.includes(k)) score -= 1; });
+    
+    // 내용 길이 분석
+    if (analysis.textLength > 5000) score += 2;
+    else if (analysis.textLength > 2000) score += 1;
+    
+    if (analysis.codeBlocks > 5) score += 2;
+    else if (analysis.codeBlocks > 2) score += 1;
+    
+    if (analysis.hasVideo) score += 2; // 영상은 시간이 더 걸림
+    if (analysis.hasQuiz) score += 1;  // 퀴즈가 있으면 더 오래 체류
+    
+    // 난이도별 딜레이 반환
+    if (score >= 5) {
+      return { min: 120000, max: 300000, level: 'hard' }; // 2~5분
+    } else if (score >= 2) {
+      return { min: 60000, max: 180000, level: 'medium' }; // 1~3분
+    } else {
+      return { min: 30000, max: 90000, level: 'easy' }; // 30초~1.5분
+    }
+  } catch (error) {
+    logger.warn(`⚠️ 난이도 분석 실패: ${error.message}`);
+    // 기본값 반환
+    return { min: 60000, max: 120000, level: 'medium' };
+  }
+}
+
 module.exports = {
   launchBrowser,
   ensureLoggedIn,
@@ -223,4 +297,5 @@ module.exports = {
   randomScroll,
   humanType,
   safeGoto,
+  getDynamicDelay,
 };

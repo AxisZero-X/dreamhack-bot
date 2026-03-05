@@ -10,18 +10,29 @@ const EXAM_URL = process.env.EXAM_URL || null; // 수료 퀴즈 직접 URL (예:
 // --- 딜레이 설정 (밀리초) ---
 const IS_TEST = process.env.TEST_MODE === '1';
 const DELAY = {
-  PAGE_STAY_MIN: IS_TEST ? 500 : 3000,
-  PAGE_STAY_MAX: IS_TEST ? 1000 : 5000,
-  BETWEEN_LECTURES_MIN: IS_TEST ? 500 : 1000,
-  BETWEEN_LECTURES_MAX: IS_TEST ? 1000 : 2000,
-  SCROLL_PAUSE_MIN: IS_TEST ? 100 : 500,
-  SCROLL_PAUSE_MAX: IS_TEST ? 300 : 1000,
+  // 강의 체류 시간: 30초~3분 (난이도별로 추가 조정됨)
+  PAGE_STAY_MIN: IS_TEST ? 500 : 30000,   // 30초
+  PAGE_STAY_MAX: IS_TEST ? 1000 : 180000, // 3분
+  
+  // 강의 간 전환: 5~20초
+  BETWEEN_LECTURES_MIN: IS_TEST ? 500 : 5000,   // 5초
+  BETWEEN_LECTURES_MAX: IS_TEST ? 1000 : 20000, // 20초
+  
+  // 스크롤 대기: 1~3초
+  SCROLL_PAUSE_MIN: IS_TEST ? 100 : 1000,  // 1초
+  SCROLL_PAUSE_MAX: IS_TEST ? 300 : 3000,  // 3초
+  
+  // 타이핑 딜레이
   TYPE_CHAR_MIN: 50,
   TYPE_CHAR_MAX: 200,
-  QUIZ_READ_MIN: IS_TEST ? 500 : 500,
-  QUIZ_READ_MAX: IS_TEST ? 1000 : 1000,
-  QUIZ_RETRY_MIN: IS_TEST ? 300 : 500,
-  QUIZ_RETRY_MAX: IS_TEST ? 500 : 1000,
+  
+  // 퀴즈 읽기: 10~30초
+  QUIZ_READ_MIN: IS_TEST ? 500 : 10000,  // 10초
+  QUIZ_READ_MAX: IS_TEST ? 1000 : 30000, // 30초
+  
+  // 퀴즈 재시도: 3~8초
+  QUIZ_RETRY_MIN: IS_TEST ? 300 : 3000,  // 3초
+  QUIZ_RETRY_MAX: IS_TEST ? 500 : 8000,  // 8초
 };
 
 // --- CSS 셀렉터 ---
