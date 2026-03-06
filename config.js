@@ -8,7 +8,7 @@ const CURRICULUM_URL = process.env.CURRICULUM_URL || 'https://dreamhack.io/euser
 const EXAM_URL = process.env.EXAM_URL || null; // 수료 퀴즈 직접 URL (예: https://learn.dreamhack.io/exam/916)
 
 // --- 퀴즈 건너뛰기 모드 ---
-const SKIP_QUIZ = process.env.SKIP_QUIZ === '1' || process.argv.includes('--skip-quiz') || true; // 기본값: true (퀴즈 건너뛰기), SKIP_QUIZ=0으로 설정 시 퀴즈 풀이
+const SKIP_QUIZ = process.env.SKIP_QUIZ === '1' || process.argv.includes('--skip-quiz') || false; // 기본값: false (퀴즈 풀이), SKIP_QUIZ=1으로 설정 시 퀴즈 건너뛰기
 
 // --- 딜레이 설정 (밀리초) ---
 const IS_TEST = process.env.TEST_MODE === '1';
