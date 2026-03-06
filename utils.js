@@ -98,11 +98,10 @@ function getDynamicDelay(base, multiplier = 1) {
 
 /**
  * 페이지에서 난이도 정보 추출 및 딜레이 계산
+ * @param {object} page - Puppeteer 페이지 오브젝트
+ * @param {number} previousWordCount - 이전에 읽은 총 단어(글자) 수
  */
-/**
- * 페이지에서 난이도 정보 추출 및 딜레이 계산
- */
-async function getDynamicDelayFromPage(page) {
+async function getDynamicDelayFromPage(page, previousWordCount = 0) {
   try {
     // 페이지에서 난이도 정보 추출 (텍스트 길이 기반)
     const { wordCount, hasVideo } = await page.evaluate(() => {
@@ -128,43 +127,48 @@ async function getDynamicDelayFromPage(page) {
     let difficulty = 'medium';
     let minDelay, maxDelay;
 
+    // 새로 늘어난 텍스트 양만 계산 (버튼 누적 클릭 방지)
+    const incrementalWordCount = Math.max(0, wordCount - previousWordCount);
+
     // 빠른 스키밍 속도 (1000자/분), 꼼꼼한 독해 속도 (800자/분)
     const charsPerMinFast = 1000;
     const charsPerMinSlow = 800;
 
-    if (wordCount < 500) {
+    // 평가용 로직은 새로 나타난 텍스트 분량(incrementalWordCount) 기준
+    if (incrementalWordCount < 500) {
       // 500자 미만: 약 30~40초 소요 
       difficulty = 'very_easy';
-      minDelay = Math.max(15000, Math.floor((wordCount / charsPerMinFast) * 60000));
-      maxDelay = Math.max(30000, Math.floor((wordCount / charsPerMinSlow) * 60000) + 15000);
-    } else if (wordCount < 1500) {
+      minDelay = Math.max(15000, Math.floor((incrementalWordCount / charsPerMinFast) * 60000));
+      maxDelay = Math.max(30000, Math.floor((incrementalWordCount / charsPerMinSlow) * 60000) + 15000);
+    } else if (incrementalWordCount < 1500) {
       // 1500자 미만
       difficulty = 'easy';
-      minDelay = Math.floor((wordCount / charsPerMinFast) * 60000);
-      maxDelay = Math.floor((wordCount / charsPerMinSlow) * 60000) + 30000;
+      minDelay = Math.floor((incrementalWordCount / charsPerMinFast) * 60000);
+      maxDelay = Math.floor((incrementalWordCount / charsPerMinSlow) * 60000) + 30000;
       minDelay = Math.max(minDelay, 20000); // 최소 20초 대기
-    } else if (wordCount < 4000) {
+    } else if (incrementalWordCount < 4000) {
       // 4000자 미만
       difficulty = 'medium';
-      minDelay = Math.floor((wordCount / charsPerMinFast) * 60000);
-      maxDelay = Math.floor((wordCount / charsPerMinSlow) * 60000) + 60000;
+      minDelay = Math.floor((incrementalWordCount / charsPerMinFast) * 60000);
+      maxDelay = Math.floor((incrementalWordCount / charsPerMinSlow) * 60000) + 60000;
       minDelay = Math.max(minDelay, 45000); // 최소 45초 대기
-    } else if (wordCount < 8000) {
+    } else if (incrementalWordCount < 8000) {
       // 8000자 미만
       difficulty = 'hard';
-      minDelay = Math.floor((wordCount / charsPerMinFast) * 60000);
-      maxDelay = Math.floor((wordCount / charsPerMinSlow) * 60000) + 90000;
+      minDelay = Math.floor((incrementalWordCount / charsPerMinFast) * 60000);
+      maxDelay = Math.floor((incrementalWordCount / charsPerMinSlow) * 60000) + 90000;
       minDelay = Math.max(minDelay, 90000); // 최소 1.5분 대기
     } else {
       // 8000자 이상
       difficulty = 'very_hard';
-      minDelay = Math.floor((wordCount / charsPerMinFast) * 60000);
-      maxDelay = Math.floor((wordCount / charsPerMinSlow) * 60000) + 120000;
+      minDelay = Math.floor((incrementalWordCount / charsPerMinFast) * 60000);
+      maxDelay = Math.floor((incrementalWordCount / charsPerMinSlow) * 60000) + 120000;
       minDelay = Math.max(minDelay, 120000); // 최소 2분 대기
     }
 
-    // 비디오가 있는 경우 시청 시간 고려해 추가 딜레이 (최소 3분 추가, 최대 제한 없음)
-    if (hasVideo) {
+    // 비디오가 있는 경우 추가 딜레이 (단, 이전에 조회된 비디오가 아니라 새로 나타난 것으로 간주되는 경우)
+    if (hasVideo && previousWordCount === 0) {
+      // previousWordCount === 0 일 때만 비디오 딜레이를 추가 (페이지 진입 최초 또는 비디오 발견 시 페이징 무시) 
       minDelay = Math.max(minDelay, 180000); // 비디오가 있으면 최소 3분 시청
       maxDelay = maxDelay + 300000; // 최대 시간에 5분 추가 
       difficulty += '_video';
@@ -173,14 +177,16 @@ async function getDynamicDelayFromPage(page) {
     return {
       level: difficulty,
       min: minDelay,
-      max: maxDelay
+      max: maxDelay,
+      totalWordCount: wordCount // 다음 계산을 위해 루프에 반환
     };
   } catch (error) {
     // 에러 발생 시 기본값 반환
     return {
       level: 'medium',
       min: 60000,
-      max: 120000
+      max: 120000,
+      totalWordCount: previousWordCount // 에러 나더라도 이전 값 유지
     };
   }
 }

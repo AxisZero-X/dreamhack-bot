@@ -8,11 +8,17 @@ const logger = require('./logger');
  */
 async function processLecture(page, cursor, { skipQuiz = false, detectQuizFn = null, solveQuizFn = null } = {}) {
   let lectureCompleted = false;
+  let previousWordCount = 0; // 이전에 이미 읽고 지나간 텍스트 분량 추적
 
   while (!lectureCompleted) {
-    // 난이도별 동적 딜레이 적용
-    const dynamicDelay = await getDynamicDelayFromPage(page);
+    // 난이도별 동적 딜레이 적용 (새로 노출된 텍스트 분량만 계산)
+    const dynamicDelay = await getDynamicDelayFromPage(page, previousWordCount);
     logger.info(`📖 강의 내용 읽는 중... (난이도: ${dynamicDelay.level}, ${Math.floor(dynamicDelay.min / 1000)}~${Math.floor(dynamicDelay.max / 1000)}초)`);
+
+    // 다음에 읽을 분량 누적을 위해 현재 총 글자 수 기록
+    if (dynamicDelay.totalWordCount !== undefined) {
+      previousWordCount = dynamicDelay.totalWordCount;
+    }
 
     await Promise.all([
       randomDelay(dynamicDelay.min, dynamicDelay.max),
@@ -44,7 +50,7 @@ async function processLecture(page, cursor, { skipQuiz = false, detectQuizFn = n
     lectureCompleted = await checkCompletionPopup(page, cursor);
 
     if (!lectureCompleted) {
-      logger.info('➡️ 다음 페이지로 넘어갔습니다. 계속 진행합니다.');
+      logger.info('➡️ 다음 단락/페이지로 넘어갔습니다. 새로 노출된 내용을 읽습니다.');
     }
   }
 }
