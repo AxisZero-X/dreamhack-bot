@@ -67,7 +67,7 @@ async function randomDelay(min, max) {
   // 균등 분포 → 가우시안 분포로 변경
   const mean = (min + max) / 2;
   const stdDev = (max - min) / 6; // 99.7% within ±3σ
-  
+
   let delay;
   do {
     // Box-Muller transform for Gaussian distribution
@@ -76,15 +76,15 @@ async function randomDelay(min, max) {
     const z0 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
     delay = mean + stdDev * z0;
   } while (delay < min || delay > max);
-  
+
   const delayMs = Math.round(delay);
   const delaySec = Math.round(delayMs / 1000);
-  
+
   // 긴 딜레이(5초 이상)만 로깅하여 반복적인 메시지 방지
   if (delaySec >= 5) {
     logger.debug(`⏱️ 대기 중... (${delaySec}초)`);
   }
-  
+
   await new Promise(resolve => setTimeout(resolve, delayMs));
   return delayMs;
 }
@@ -101,40 +101,79 @@ function getDynamicDelay(base, multiplier = 1) {
  */
 async function getDynamicDelayFromPage(page) {
   try {
-    // 페이지에서 난이도 정보 추출
-    const difficulty = await page.evaluate(() => {
-      // 다양한 방법으로 난이도 추출 시도
-      const bodyText = document.body.innerText.toLowerCase();
-      
-      if (bodyText.includes('어려움') || bodyText.includes('hard') || bodyText.includes('advanced')) {
-        return 'hard';
-      } else if (bodyText.includes('쉬움') || bodyText.includes('easy') || bodyText.includes('beginner')) {
-        return 'easy';
-      } else {
-        return 'medium';
-      }
+    // 페이지에서 난이도 정보 추출 (텍스트 길이 기반)
+    const { wordCount, hasVideo } = await page.evaluate(() => {
+      // 본문 텍스트 길이 (불필요한 공백 제거)
+      const text = document.body.innerText || '';
+      const cleanText = text.replace(/\s+/g, ' ').trim();
+      const hasVideo = document.querySelectorAll('video, iframe[src*="youtube"]').length > 0;
+
+      return {
+        wordCount: cleanText.length,
+        hasVideo
+      };
     });
-    
-    // 난이도별 딜레이 설정
-    const delays = {
-      easy: { min: 30000, max: 60000 },    // 30-60초
-      medium: { min: 60000, max: 120000 },  // 60-120초
-      hard: { min: 90000, max: 180000 }     // 90-180초
-    };
-    
-    const { min, max } = delays[difficulty] || delays.medium;
-    
+
+    // config.js의 DELAY를 불러와 기본값으로 활용
+    const { DELAY } = require('./config');
+
+    // 기본 범위 (config.js 설정 기준)
+    let minDelay = DELAY.PAGE_STAY_MIN || 30000;
+    let maxDelay = DELAY.PAGE_STAY_MAX || 180000;
+
+    // 테스트 모드인 경우
+    if (minDelay < 5000) {
+      return { level: 'test', min: minDelay, max: maxDelay };
+    }
+
+    let difficulty = 'medium';
+
+    // 텍스트 길이에 따른 동적 스케일링
+    if (wordCount < 500) {
+      // 500자 미만 (매우 짧음): 10초 ~ 20초
+      difficulty = 'very_easy';
+      minDelay = 10000;
+      maxDelay = 20000;
+    } else if (wordCount < 1500) {
+      // 1500자 미만 (짧음): 15초 ~ 35초
+      difficulty = 'easy';
+      minDelay = 15000;
+      maxDelay = 35000;
+    } else if (wordCount < 4000) {
+      // 4000자 미만 (보통): 30초 ~ 70초
+      difficulty = 'medium';
+      minDelay = 30000;
+      maxDelay = 70000;
+    } else if (wordCount < 8000) {
+      // 8000자 미만 (긺): 60초 ~ 120초
+      difficulty = 'hard';
+      minDelay = 60000;
+      maxDelay = 120000;
+    } else {
+      // 8000자 이상 (매우 긺): 90초 ~ 180초
+      difficulty = 'very_hard';
+      minDelay = 90000;
+      maxDelay = 180000;
+    }
+
+    // 비디오가 있는 경우 시청 시간 고려해 추가 딜레이 (최소 60초 추가, 최대 180초 추가)
+    if (hasVideo) {
+      minDelay = Math.max(minDelay, 60000); // 비디오가 있으면 최소 1분 시청
+      maxDelay = Math.max(maxDelay + 30000, 180000); // 최대 시간도 늘림 (최대 3분 이상)
+      difficulty += '_video';
+    }
+
     return {
       level: difficulty,
-      min,
-      max
+      min: minDelay,
+      max: maxDelay
     };
   } catch (error) {
     // 에러 발생 시 기본값 반환
     return {
       level: 'medium',
-      min: 60000,
-      max: 120000
+      min: 30000,
+      max: 60000
     };
   }
 }
@@ -145,7 +184,7 @@ async function getDynamicDelayFromPage(page) {
 async function randomScroll(page) {
   const scrollHeight = await page.evaluate(() => document.body.scrollHeight);
   const viewportHeight = await page.evaluate(() => window.innerHeight);
-  
+
   if (scrollHeight > viewportHeight * 1.5) {
     const scrollTo = Math.floor(Math.random() * (scrollHeight - viewportHeight));
     await page.evaluate((y) => {
@@ -165,7 +204,7 @@ async function humanType(page, selector, text, options = {}) {
     const el = document.querySelector(sel);
     if (el) el.value = '';
   }, selector);
-  
+
   for (const char of text) {
     await page.type(selector, char, { delay: Math.random() * (delayMax - delayMin) + delayMin });
     // 가끔 실수 모방 (백스페이스)
@@ -185,7 +224,7 @@ async function humanType(page, selector, text, options = {}) {
 async function ensureLoggedIn(page, email, password) {
   return await errorHandler.withErrorHandling(async () => {
     const currentUrl = page.url();
-    
+
     // 이미 로그인된 상태인지 확인 - 실제 콘텐츠 접근 테스트
     if (currentUrl.includes('dreamhack.io') && !currentUrl.includes('/login')) {
       try {
@@ -193,7 +232,7 @@ async function ensureLoggedIn(page, email, password) {
         const testUrl = 'https://dreamhack.io/euser/curriculums/916'; // 테스트용 커리큘럼
         await page.goto(testUrl, { waitUntil: 'networkidle2', timeout: 10000 });
         await randomDelay(2000, 3000);
-        
+
         // 실제 강의 항목이 보이는지 확인
         const hasContent = await page.evaluate(() => {
           // 다양한 강의 항목 셀렉터
@@ -206,17 +245,17 @@ async function ensureLoggedIn(page, email, password) {
             '.entity-title',
             '.title'
           ];
-          
+
           return contentSelectors.some(selector => {
             const elements = document.querySelectorAll(selector);
-            return Array.from(elements).some(el => 
-              el.offsetParent !== null && 
-              el.innerText && 
+            return Array.from(elements).some(el =>
+              el.offsetParent !== null &&
+              el.innerText &&
               el.innerText.trim().length > 0
             );
           });
         });
-        
+
         if (hasContent) {
           logger.info('✅ 이미 로그인된 상태입니다. (실제 콘텐츠 확인)');
           return;
@@ -227,13 +266,13 @@ async function ensureLoggedIn(page, email, password) {
         logger.warn(`⚠️ 로그인 상태 확인 중 에러: ${error.message}. 재로그인 시도합니다.`);
       }
     }
-    
+
     logger.info('🔐 로그인 시도 중...');
-    
+
     // 로그인 페이지로 이동
     await page.goto('https://dreamhack.io/users/login', { waitUntil: 'networkidle2' });
     await randomDelay(2000, 4000);
-    
+
     // 이메일 입력 필드 찾기 (다양한 셀렉터로 시도)
     const emailSelectors = [
       'input[type="email"]',
@@ -245,7 +284,7 @@ async function ensureLoggedIn(page, email, password) {
       'input[autocomplete="email"]',
       'input[autocomplete="username"]'
     ];
-    
+
     try {
       await page.waitForSelector(emailSelectors.join(', '), { timeout: 10000 });
       await humanType(page, emailSelectors.join(', '), email);
@@ -253,9 +292,9 @@ async function ensureLoggedIn(page, email, password) {
       logger.error('❌ 이메일 입력 필드를 찾을 수 없습니다.');
       throw error;
     }
-    
+
     await randomDelay(500, 1000);
-    
+
     // 비밀번호 입력 필드 찾기 - 정확한 셀렉터 사용
     const passwordSelectors = [
       'input[type="password"]',
@@ -267,11 +306,11 @@ async function ensureLoggedIn(page, email, password) {
       'input[autocomplete="current-password"]',
       'input[autocomplete="password"]'
     ];
-    
+
     try {
       // 정확한 비밀번호 필드만 선택 (이메일 필드와 혼동 방지)
       await page.waitForSelector(passwordSelectors.join(', '), { timeout: 5000 });
-      
+
       // 비밀번호 필드가 정말 비밀번호 필드인지 확인
       const isPasswordField = await page.evaluate((selectors) => {
         const selectorList = selectors.split(', ');
@@ -283,19 +322,19 @@ async function ensureLoggedIn(page, email, password) {
         }
         return false;
       }, passwordSelectors.join(', '));
-      
+
       if (!isPasswordField) {
         throw new Error('비밀번호 필드가 아닌 다른 필드가 선택되었습니다.');
       }
-      
+
       await humanType(page, passwordSelectors.join(', '), password);
     } catch (error) {
       logger.error('❌ 비밀번호 입력 필드를 찾을 수 없습니다.');
       throw error;
     }
-    
+
     await randomDelay(500, 1000);
-    
+
     // 로그인 버튼 클릭 (업데이트된 셀렉터)
     const loginButtonSelectors = [
       'button[type="submit"]',
@@ -310,33 +349,33 @@ async function ensureLoggedIn(page, email, password) {
       '#login-button',
       '[data-testid="login-button"]'
     ];
-    
+
     try {
       // 먼저 버튼이 활성화될 때까지 대기 (비밀번호 입력 후)
       await page.waitForFunction(() => {
         const buttons = Array.from(document.querySelectorAll('button'));
-        const loginButton = buttons.find(btn => 
-          btn.offsetParent !== null && 
-          !btn.disabled && 
+        const loginButton = buttons.find(btn =>
+          btn.offsetParent !== null &&
+          !btn.disabled &&
           !btn.classList.contains('disabled') &&
           (btn.innerText.includes('로그인') || btn.innerText.includes('Login'))
         );
         return loginButton !== undefined;
       }, { timeout: 10000 });
-      
+
       // 셀렉터로 클릭 시도
       await page.waitForSelector(loginButtonSelectors.join(', '), { timeout: 10000 });
       await page.click(loginButtonSelectors.join(', '));
     } catch (error) {
       logger.error('❌ 로그인 버튼을 찾을 수 없습니다. JavaScript로 직접 클릭 시도...');
-      
+
       // 대체 방법: JavaScript로 직접 클릭 시도
       try {
         const clicked = await page.evaluate(() => {
           const buttons = Array.from(document.querySelectorAll('button'));
-          const loginButton = buttons.find(btn => 
-            btn.offsetParent !== null && 
-            !btn.disabled && 
+          const loginButton = buttons.find(btn =>
+            btn.offsetParent !== null &&
+            !btn.disabled &&
             !btn.classList.contains('disabled') &&
             (btn.innerText.includes('로그인') || btn.innerText.includes('Login'))
           );
@@ -346,7 +385,7 @@ async function ensureLoggedIn(page, email, password) {
           }
           return false;
         });
-        
+
         if (clicked) {
           logger.info('✅ JavaScript로 로그인 버튼 클릭 성공');
         } else {
@@ -358,26 +397,26 @@ async function ensureLoggedIn(page, email, password) {
         throw error;
       }
     }
-    
+
     await randomDelay(3000, 6000);
-    
+
     // 로그인 성공 확인 - 실제 콘텐츠 접근 테스트
     let loginSuccess = false;
     let errorMessage = '';
-    
+
     // 방법 1: 실제 커리큘럼 콘텐츠 접근 테스트 (가장 신뢰성 높음)
     try {
       // 커리큘럼 페이지로 이동 시도
       const testUrl = 'https://dreamhack.io/euser/curriculums/916';
       await page.goto(testUrl, { waitUntil: 'networkidle2', timeout: 15000 });
       await randomDelay(2000, 3000);
-      
+
       // 실제 강의 콘텐츠가 보이는지 확인
       const hasActualContent = await page.evaluate(() => {
         // 강의 항목이 실제로 보이는지 확인
         const contentSelectors = [
           '.entity',
-          '.lecture-item', 
+          '.lecture-item',
           '.course-item',
           '.curriculum-item',
           '.entity-title',
@@ -385,17 +424,17 @@ async function ensureLoggedIn(page, email, password) {
           '[class*="item"]',
           '.action-text'
         ];
-        
+
         return contentSelectors.some(selector => {
           const elements = document.querySelectorAll(selector);
-          return Array.from(elements).some(el => 
-            el.offsetParent !== null && 
-            el.innerText && 
+          return Array.from(elements).some(el =>
+            el.offsetParent !== null &&
+            el.innerText &&
             el.innerText.trim().length > 0
           );
         });
       });
-      
+
       if (hasActualContent) {
         logger.info('✅ 로그인 성공! (실제 콘텐츠 확인)');
         loginSuccess = true;
@@ -405,7 +444,7 @@ async function ensureLoggedIn(page, email, password) {
     } catch (error) {
       errorMessage = `실제 콘텐츠 확인 실패: ${error.message}`;
     }
-    
+
     // 방법 2: 다양한 셀렉터로 로그인 상태 확인 (보조 확인)
     if (!loginSuccess) {
       try {
@@ -421,7 +460,7 @@ async function ensureLoggedIn(page, email, password) {
           'header button',
           '.header-actions button'
         ];
-        
+
         await page.waitForSelector(successSelectors.join(', '), { timeout: 10000 });
         logger.info('✅ 로그인 성공! (셀렉터 확인)');
         loginSuccess = true;
@@ -429,7 +468,7 @@ async function ensureLoggedIn(page, email, password) {
         errorMessage += ` | 셀렉터 확인 실패: ${error.message}`;
       }
     }
-    
+
     // 방법 3: URL 확인 (로그인 후 특정 페이지로 이동하는지)
     if (!loginSuccess) {
       const newUrl = page.url();
@@ -440,13 +479,13 @@ async function ensureLoggedIn(page, email, password) {
         errorMessage += ` | URL 확인 실패: ${newUrl}`;
       }
     }
-    
+
     // 방법 4: 페이지 텍스트 확인 (로그인 실패 메시지가 없는지)
     if (!loginSuccess) {
       const pageText = await page.evaluate(() => document.body.innerText.toLowerCase());
       const failureKeywords = ['잘못된', '틀렸', '오류', '실패', 'error', 'invalid', 'incorrect', 'wrong'];
       const hasFailure = failureKeywords.some(keyword => pageText.includes(keyword));
-      
+
       if (!hasFailure) {
         logger.info('✅ 로그인 성공! (텍스트 확인)');
         loginSuccess = true;
@@ -454,10 +493,10 @@ async function ensureLoggedIn(page, email, password) {
         errorMessage += ` | 텍스트 확인 실패: 실패 키워드 발견`;
       }
     }
-    
+
     if (!loginSuccess) {
       logger.error(`❌ 로그인 실패. 수동으로 확인해주세요. 에러: ${errorMessage}`);
-      
+
       // 디버깅을 위한 스크린샷 캡처
       try {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -467,10 +506,10 @@ async function ensureLoggedIn(page, email, password) {
       } catch (screenshotError) {
         logger.warn(`⚠️ 스크린샷 캡처 실패: ${screenshotError.message}`);
       }
-      
+
       throw new Error(`로그인 실패: ${errorMessage}`);
     }
-    
+
     logger.info('🎉 로그인 완료! 실제 콘텐츠 접근 가능 확인됨.');
   }, {
     page,
