@@ -1,6 +1,6 @@
 const { createCursor } = require('ghost-cursor');
 const { EXAM_URL, DELAY, SELECTORS, SKIP_QUIZ, AUTO_LOGIN } = require('./config');
-const { launchBrowser, ensureLoggedIn, randomDelay, randomScroll, humanType, getDynamicDelay } = require('./utils');
+const { launchBrowser, ensureLoggedIn, randomDelay, randomScroll, humanType, getDynamicDelayFromPage } = require('./utils');
 const { searchFlagForWargame } = require('./search');
 const aiProvider = require('./aiProvider');
 const readline = require('readline');
@@ -332,7 +332,7 @@ async function getCurrentCompletionRate(page, curriculumUrl) {
 
         while (!lectureCompleted) {
           // 난이도별 동적 딜레이 적용
-          dynamicDelay = await getDynamicDelay(page);
+          dynamicDelay = await getDynamicDelayFromPage(page);
           console.log(`📖 강의 내용 읽는 중... (난이도: ${dynamicDelay.level}, ${Math.floor(dynamicDelay.min/1000)}~${Math.floor(dynamicDelay.max/1000)}초)`);
           
           await Promise.all([
@@ -1145,13 +1145,21 @@ JSON 배열만 출력, 다른 설명 생략.`;
 
         try {
           const raw = await aiProvider.getCompletion(prompt, systemPrompt);
-          if(!raw) throw new Error('Empty response from AI');
-          const parsed = JSON.parse(raw.match(/\[[\d,\s]+\]/)?.[0] || 'null');
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            aiIndices = parsed.filter(i => i >= 0 && i < currentTexts.length);
-            console.log(`  🤖 AI 예측: [${aiIndices.join(', ')}]`);
+          if (raw === null) {
+            console.log(`  🤖 AI 사용 불가 - 브루트포스 모드로 전환`);
+            aiIndices = null;
+          } else if (!raw) {
+            console.log(`  ⚠️ AI 응답이 비어있습니다`);
+            aiIndices = null;
           } else {
-            console.log(`  ⚠️ AI 응답 파싱 실패: ${raw}`);
+            const parsed = JSON.parse(raw.match(/\[[\d,\s]+\]/)?.[0] || 'null');
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              aiIndices = parsed.filter(i => i >= 0 && i < currentTexts.length);
+              console.log(`  🤖 AI 예측: [${aiIndices.join(', ')}]`);
+            } else {
+              console.log(`  ⚠️ AI 응답 파싱 실패: ${raw}`);
+              aiIndices = null;
+            }
           }
         } catch (err) {
           console.log(`  ⚠️ AI 예측 에러: ${err.message}`);
@@ -1926,12 +1934,15 @@ ${lectureText.substring(0, 6000)}
 응답 형식: 플래그 문자열만 출력 (예: DH{some_flag_here}). 확신이 없으면 "모름"이라고만 출력.`;
 
             const aiAnswer = await aiProvider.getCompletion(aiPrompt, systemPrompt);
-            console.log(`🤖 AI 응답: ${aiAnswer}`);
-
-            const aiFlag = aiAnswer.match(/DH\{[^}]+\}/)?.[0];
-            if (aiFlag) {
-              flag = aiFlag;
-              console.log(`🎯 AI가 플래그를 추론/추출: ${flag}`);
+            if (aiAnswer === null) {
+              console.log(`🤖 AI 사용 불가 - 플래그 추론 스킵`);
+            } else {
+              console.log(`🤖 AI 응답: ${aiAnswer}`);
+              const aiFlag = aiAnswer.match(/DH\{[^}]+\}/)?.[0];
+              if (aiFlag) {
+                flag = aiFlag;
+                console.log(`🎯 AI가 플래그를 추론/추출: ${flag}`);
+              }
             }
           } catch (err) {
             console.log(`⚠️ AI API 호출 실패: ${err.message}`);
@@ -1963,10 +1974,14 @@ ${problemText}
 이 문제의 DH{...} 형식 플래그를 추론해주세요. 확신이 없으면 "모름"이라고만 출력.`;
 
         const aiAnswer = await aiProvider.getCompletion(aiPrompt);
-        const aiFlag = aiAnswer.match(/DH\{[^}]+\}/)?.[0];
-        if (aiFlag) {
-          flag = aiFlag;
-          console.log(`🤖 AI 최후 추론 플래그: ${flag}`);
+        if (aiAnswer === null) {
+          console.log(`🤖 AI 사용 불가 - 최후 추론 스킵`);
+        } else {
+          const aiFlag = aiAnswer.match(/DH\{[^}]+\}/)?.[0];
+          if (aiFlag) {
+            flag = aiFlag;
+            console.log(`🤖 AI 최후 추론 플래그: ${flag}`);
+          }
         }
       } catch (err) {
         console.log(`⚠️ AI 최후 추론 실패: ${err.message}`);

@@ -97,6 +97,49 @@ function getDynamicDelay(base, multiplier = 1) {
 }
 
 /**
+ * 페이지에서 난이도 정보 추출 및 딜레이 계산
+ */
+async function getDynamicDelayFromPage(page) {
+  try {
+    // 페이지에서 난이도 정보 추출
+    const difficulty = await page.evaluate(() => {
+      // 다양한 방법으로 난이도 추출 시도
+      const bodyText = document.body.innerText.toLowerCase();
+      
+      if (bodyText.includes('어려움') || bodyText.includes('hard') || bodyText.includes('advanced')) {
+        return 'hard';
+      } else if (bodyText.includes('쉬움') || bodyText.includes('easy') || bodyText.includes('beginner')) {
+        return 'easy';
+      } else {
+        return 'medium';
+      }
+    });
+    
+    // 난이도별 딜레이 설정
+    const delays = {
+      easy: { min: 30000, max: 60000 },    // 30-60초
+      medium: { min: 60000, max: 120000 },  // 60-120초
+      hard: { min: 90000, max: 180000 }     // 90-180초
+    };
+    
+    const { min, max } = delays[difficulty] || delays.medium;
+    
+    return {
+      level: difficulty,
+      min,
+      max
+    };
+  } catch (error) {
+    // 에러 발생 시 기본값 반환
+    return {
+      level: 'medium',
+      min: 60000,
+      max: 120000
+    };
+  }
+}
+
+/**
  * 무작위 스크롤 (사용자 행동 모방)
  */
 async function randomScroll(page) {
@@ -440,6 +483,7 @@ module.exports = {
   launchBrowser,
   randomDelay,
   getDynamicDelay,
+  getDynamicDelayFromPage,
   randomScroll,
   humanType,
   ensureLoggedIn,
