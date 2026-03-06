@@ -51,6 +51,7 @@ async function launchBrowser() {
       '--disable-background-networking',
       '--disable-component-cloud-policy',
       '--lang=ko', // 한국어 언어 설정
+      '--accept-lang=ko', // 언어 수락 설정 추가
     ],
   });
   return browser;
@@ -210,22 +211,67 @@ async function ensureLoggedIn(page, email, password) {
   
   await randomDelay(500, 1000);
   
-  // 로그인 버튼 클릭
+  // 로그인 버튼 클릭 (업데이트된 셀렉터)
   const loginButtonSelectors = [
     'button[type="submit"]',
     '.login-button',
-    '.el-button--primary',
+    '.btn-login',
+    '.btn.btn-login',
+    '.dh3-button',
+    '.btn-secondary',
     'button:contains("로그인")',
     'button:contains("Login")',
-    '.submit-button'
+    '.submit-button',
+    '#login-button',
+    '[data-testid="login-button"]'
   ];
   
   try {
-    await page.waitForSelector(loginButtonSelectors.join(', '), { timeout: 5000 });
+    // 먼저 버튼이 활성화될 때까지 대기 (비밀번호 입력 후)
+    await page.waitForFunction(() => {
+      const buttons = Array.from(document.querySelectorAll('button'));
+      const loginButton = buttons.find(btn => 
+        btn.offsetParent !== null && 
+        !btn.disabled && 
+        !btn.classList.contains('disabled') &&
+        (btn.innerText.includes('로그인') || btn.innerText.includes('Login'))
+      );
+      return loginButton !== undefined;
+    }, { timeout: 10000 });
+    
+    // 셀렉터로 클릭 시도
+    await page.waitForSelector(loginButtonSelectors.join(', '), { timeout: 10000 });
     await page.click(loginButtonSelectors.join(', '));
   } catch (error) {
-    logger.error('❌ 로그인 버튼을 찾을 수 없습니다.');
-    throw error;
+    logger.error('❌ 로그인 버튼을 찾을 수 없습니다. JavaScript로 직접 클릭 시도...');
+    
+    // 대체 방법: JavaScript로 직접 클릭 시도
+    try {
+      const clicked = await page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button'));
+        const loginButton = buttons.find(btn => 
+          btn.offsetParent !== null && 
+          !btn.disabled && 
+          !btn.classList.contains('disabled') &&
+          (btn.innerText.includes('로그인') || btn.innerText.includes('Login'))
+        );
+        if (loginButton) {
+          loginButton.click();
+          return true;
+        }
+        return false;
+      });
+      
+      if (clicked) {
+        logger.info('✅ JavaScript로 로그인 버튼 클릭 성공');
+      } else {
+        logger.error('❌ JavaScript로도 로그인 버튼을 찾을 수 없습니다.');
+        throw error;
+      }
+    } catch (jsError) {
+      logger.error('❌ JavaScript 실행 중 에러:', jsError.message);
+      throw error;
+    }
   }
   
   await randomDelay(3000, 6000);
