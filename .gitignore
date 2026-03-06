@@ -11,4 +11,17 @@ logs/
 *.html
 *.png
 !README.md
+
+# 임시/디버그/테스트 스크립트
+test_*.js
+debug_*.js
+dump_*.js
+fix_*.js
+patch_*.js
+run_submit_test*.js
+solve_specific_quiz.js
+setup-login.js
+improved_setup_login.js
+inspect_exam_retry.js
 tryChoiceTexts_output.txt
+package_updates.json
