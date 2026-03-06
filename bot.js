@@ -174,29 +174,10 @@ async function getCurrentCompletionRate(page, curriculumUrl) {
         }
         await new Promise(resolve => setTimeout(resolve, 1000));
         
-        // 주기적으로 로그인 상태 확인
+        // 주기적으로 로그인 상태 확인 (강화된 검증)
         if (i % 15 === 0) {
           try {
-            const isLoggedIn = await page.evaluate(() => {
-              const loginSelectors = [
-                '.user-info',
-                '[data-testid="user-menu"]',
-                '.user-menu',
-                '[class*="user"]',
-                '.avatar',
-                '.profile',
-                '.el-dropdown',
-                'img[src*="avatar"]',
-                'button:has(svg)',
-                'header button',
-                '.header-actions button'
-              ];
-              
-              return loginSelectors.some(selector => 
-                document.querySelector(selector) !== null && 
-                document.querySelector(selector).offsetParent !== null
-              );
-            });
+            const isLoggedIn = await verifyLoginStatus(page);
             
             if (isLoggedIn) {
               console.log('✅ 로그인 감지됨! 계속 진행합니다.');
@@ -211,52 +192,12 @@ async function getCurrentCompletionRate(page, curriculumUrl) {
       console.log('✅ 로그인 대기 완료. 로그인 상태를 확인합니다...');
       
       // 최종 로그인 상태 확인 (강화된 검증)
+      const isLoggedIn = await verifyLoginStatus(page);
       const currentUrl = page.url();
       console.log('현재 URL:', currentUrl);
       
-      // URL 기반 기본 확인
-      if (currentUrl.includes('dreamhack.io') && !currentUrl.includes('/login')) {
-        console.log('✅ URL 확인: 로그인 페이지 아님');
-        
-        // 실제 콘텐츠 접근 테스트로 추가 확인
-        try {
-          // 커리큘럼 페이지로 이동하여 실제 콘텐츠 확인
-          const testUrl = 'https://dreamhack.io/euser/curriculums/916';
-          await page.goto(testUrl, { waitUntil: 'networkidle2', timeout: 10000 });
-          await randomDelay(2000, 3000);
-          
-          const hasContent = await page.evaluate(() => {
-            const contentSelectors = [
-              '.entity',
-              '.lecture-item',
-              '.course-item',
-              '.curriculum-item',
-              '.entity-title',
-              '.title',
-              '[class*="item"]',
-              '.action-text'
-            ];
-            
-            return contentSelectors.some(selector => {
-              const elements = document.querySelectorAll(selector);
-              return Array.from(elements).some(el => 
-                el.offsetParent !== null && 
-                el.innerText && 
-                el.innerText.trim().length > 0
-              );
-            });
-          });
-          
-          if (hasContent) {
-            console.log('✅ 로그인 성공 확인 (실제 콘텐츠 확인)');
-          } else {
-            console.log('⚠️ 로그인 상태 불확실 - 콘텐츠를 찾을 수 없습니다.');
-            console.log('⚠️ 로그인이 완료되지 않았을 수 있습니다. 수동으로 확인해주세요.');
-          }
-        } catch (error) {
-          console.log('⚠️ 로그인 상태 확인 중 에러:', error.message);
-          console.log('⚠️ 로그인이 완료되지 않았을 수 있습니다. 수동으로 확인해주세요.');
-        }
+      if (isLoggedIn) {
+        console.log('✅ 로그인 성공 확인 (다단계 검증 통과)');
       } else {
         console.log('⚠️ 로그인이 완료되지 않았을 수 있습니다. 수동으로 확인해주세요.');
         console.log('⚠️ 현재 로그인 페이지에 머물러 있습니다.');
@@ -1727,6 +1668,150 @@ async function finishQuiz(page, cursor) {
     }
   } catch (err) {
     console.log('⚠️  퀴즈 최종 제출 처리 중 에러:', err.message);
+  }
+}
+
+/**
+ * 로그인 상태 검증 (다단계 검증)
+ */
+async function verifyLoginStatus(page) {
+  try {
+    // 1단계: URL 검증 - 로그인 페이지가 아닌지 확인
+    const currentUrl = page.url();
+    if (currentUrl.includes('/login') || !currentUrl.includes('dreamhack.io')) {
+      console.log('🔍 URL 검증 실패: 로그인 페이지에 머물러 있음');
+      return false;
+    }
+    
+    // 2단계: 로그인 폼 요소가 없는지 확인
+    const hasLoginForm = await page.evaluate(() => {
+      const loginFormSelectors = [
+        'input[type="email"]',
+        'input[type="password"]',
+        'input[name="email"]',
+        'input[name="password"]',
+        'input[placeholder*="이메일"]',
+        'input[placeholder*="비밀번호"]',
+        'form[action*="login"]',
+        '.login-form',
+        '.signin-form'
+      ];
+      
+      return loginFormSelectors.some(selector => {
+        const element = document.querySelector(selector);
+        return element && element.offsetParent !== null;
+      });
+    });
+    
+    if (hasLoginForm) {
+      console.log('🔍 로그인 폼 검증 실패: 로그인 폼 요소가 존재함');
+      return false;
+    }
+    
+    // 3단계: 실제 로그인된 사용자에게만 나타나는 요소 확인 (강화된 셀렉터)
+    const hasUserElements = await page.evaluate(() => {
+      // 로그인된 사용자에게만 나타나는 구체적인 요소들
+      const userSpecificSelectors = [
+        '.user-info .avatar',  // 아바타가 있는 사용자 정보
+        '.user-menu .el-dropdown',  // 드롭다운 메뉴
+        'img[src*="avatar"][src*="dreamhack"]',  // 드림핵 아바타 이미지
+        '[data-testid="user-menu"] .user-avatar',  // 테스트 ID 기반 사용자 메뉴
+        '.header-user .profile-image',  // 헤더 사용자 프로필 이미지
+        '.el-dropdown-menu .user-name',  // 드롭다운 메뉴 내 사용자 이름
+        '.user-profile .profile-info'  // 사용자 프로필 정보
+      ];
+      
+      // 일반적인 버튼이나 헤더 요소는 제외 (로그인 페이지에도 있을 수 있음)
+      const excludeSelectors = [
+        'header button',
+        '.header-actions button',
+        'button:has(svg)',
+        '.el-dropdown:not(.user-menu)',  // 사용자 메뉴가 아닌 드롭다운
+        '[class*="user"]:not(.user-info):not(.user-menu):not(.user-profile)'  // 사용자 관련이 아닌 클래스
+      ];
+      
+      // 포함할 요소 확인
+      const hasIncluded = userSpecificSelectors.some(selector => {
+        const element = document.querySelector(selector);
+        return element && element.offsetParent !== null;
+      });
+      
+      // 제외할 요소 확인
+      const hasExcluded = excludeSelectors.some(selector => {
+        const element = document.querySelector(selector);
+        return element && element.offsetParent !== null;
+      });
+      
+      // 포함 요소가 있고 제외 요소가 없어야 함
+      return hasIncluded && !hasExcluded;
+    });
+    
+    if (!hasUserElements) {
+      console.log('🔍 사용자 요소 검증 실패: 로그인된 사용자 특정 요소 없음');
+      return false;
+    }
+    
+    // 4단계: 실제 콘텐츠 접근 테스트 (커리큘럼 페이지 로드)
+    try {
+      const testUrl = 'https://dreamhack.io/euser/curriculums/916';
+      await page.goto(testUrl, { waitUntil: 'networkidle2', timeout: 10000 });
+      await randomDelay(2000, 3000);
+      
+      const hasContent = await page.evaluate(() => {
+        const contentSelectors = [
+          '.entity',
+          '.lecture-item',
+          '.course-item',
+          '.curriculum-item',
+          '.entity-title',
+          '.title',
+          '[class*="item"]',
+          '.action-text'
+        ];
+        
+        return contentSelectors.some(selector => {
+          const elements = document.querySelectorAll(selector);
+          return Array.from(elements).some(el => 
+            el.offsetParent !== null && 
+            el.innerText && 
+            el.innerText.trim().length > 0
+          );
+        });
+      });
+      
+      if (!hasContent) {
+        console.log('🔍 콘텐츠 접근 검증 실패: 실제 강의 콘텐츠 없음');
+        return false;
+      }
+    } catch (error) {
+      console.log('🔍 콘텐츠 접근 검증 실패:', error.message);
+      return false;
+    }
+    
+    // 5단계: 세션 쿠키 확인 (선택적)
+    try {
+      const cookies = await page.cookies();
+      const hasSessionCookie = cookies.some(cookie => 
+        cookie.name.includes('session') || 
+        cookie.name.includes('auth') || 
+        cookie.name.includes('token')
+      );
+      
+      if (!hasSessionCookie) {
+        console.log('🔍 세션 쿠키 검증: 세션 쿠키 없음 (경고)');
+        // 세션 쿠키가 없어도 다른 검증이 통과했다면 계속 진행
+      }
+    } catch (error) {
+      // 쿠키 확인 실패는 무시
+    }
+    
+    // 모든 검증 통과
+    console.log('✅ 다단계 로그인 검증 통과');
+    return true;
+    
+  } catch (error) {
+    console.log('🔍 로그인 검증 중 에러:', error.message);
+    return false;
   }
 }
 
