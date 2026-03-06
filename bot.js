@@ -1,7 +1,6 @@
 const { createCursor } = require('ghost-cursor');
 const { EXAM_URL, DELAY, SELECTORS, SKIP_QUIZ, AUTO_LOGIN } = require('./config');
 const { launchBrowser, ensureLoggedIn, randomDelay, randomScroll, humanType, getDynamicDelayFromPage } = require('./utils');
-const { searchFlagForWargame } = require('./search');
 const aiProvider = require('./aiProvider');
 const readline = require('readline');
 const logger = require('./logger');
@@ -2340,16 +2339,7 @@ ${lectureText.substring(0, 6000)}
       }
     }
 
-    // === 2단계: 웹 검색을 통한 플래그 획득 시도 ===
-    if (!flag) {
-      console.log(`🔍 검색용 새 탭을 엽니다...`);
-      const searchPage = await browser.newPage();
-      flag = await searchFlagForWargame(searchPage, title);
-      await searchPage.close();
-      console.log(`🔍 검색용 새 탭을 닫았습니다.`);
-    }
-
-    // === 3단계: AI에게 문제 설명만으로 최후 추론 요청 ===
+    // === 2단계: AI에게 문제 설명만으로 최후 추론 요청 ===
     if (!flag) {
       try {
         console.log(`🤖 AI에게 문제 설명 기반 추론 요청 중...`);
@@ -2421,7 +2411,7 @@ ${problemText}
           
           // 1. 먼저 메시지 분석 (모달 닫기 전에)
           const successKeywords = ['정답입니다', 'Correct', '축하합니다', '성공', '통과', '맞췄습니다'];
-          const failureKeywords = ['아쉽게도 틀렸습니다', '틀렸', '오답', 'Incorrect', 'Wrong', '실패', 'Failed'];
+          const failureKeywords = ['아쉽게도 틀렸습니다', '틀렸', '오답', 'Incorrect', 'Wrong', '실패', 'Failed', '잘못된 정답입니다'];
           
           let isSuccess = false;
           let isFailure = false;
@@ -2442,27 +2432,59 @@ ${problemText}
           }
           
           // 2. 시각적 요소 확인 (클래스, 아이콘 등)
-          const successElements = document.querySelectorAll('.is-success, .is-correct, .check-icon, .success-icon');
-          const failureElements = document.querySelectorAll('.is-wrong, .is-incorrect, .is-error, .wrong-icon');
+          const successElements = document.querySelectorAll('.is-success, .is-correct, .check-icon, .success-icon, .el-icon-success');
+          const failureElements = document.querySelectorAll('.is-wrong, .is-incorrect, .is-error, .wrong-icon, .el-icon-error');
           
           if (successElements.length > 0) isSuccess = true;
           if (failureElements.length > 0) isFailure = true;
           
-          // 3. 모달 닫기 버튼 클릭 (있으면)
-          const alertBtn = document.querySelector('.el-message-box__btns .el-button--primary, .el-message-box__btns .btn-primary');
-          if (alertBtn) {
-            alertBtn.click();
+          // 3. 모달 확인 및 처리
+          const alertBox = document.querySelector('.el-message-box, .el-notification, .modal, .message-box');
+          let modalText = '';
+          
+          if (alertBox) {
+            modalText = alertBox.innerText || '';
+            
+            // 모달 텍스트로 추가 판단
+            for (const keyword of successKeywords) {
+              if (modalText.includes(keyword)) {
+                isSuccess = true;
+                break;
+              }
+            }
+            
+            for (const keyword of failureKeywords) {
+              if (modalText.includes(keyword)) {
+                isFailure = true;
+                break;
+              }
+            }
+            
+            // 모달 닫기 버튼 클릭
+            const alertBtn = alertBox.querySelector('.el-button--primary, .btn-primary, .confirm-btn, [class*="confirm"]');
+            if (alertBtn) {
+              alertBtn.click();
+            }
           }
           
-          return { isSuccess, isFailure };
+          // 4. 최종 판단
+          if (isSuccess && !isFailure) {
+            return { success: true, message: '정답' };
+          } else if (isFailure && !isSuccess) {
+            return { success: false, message: '오답' };
+          } else if (isSuccess && isFailure) {
+            // 충돌 상황: 실패 우선
+            return { success: false, message: '오답 (충돌)' };
+          } else {
+            // 명확한 표시 없음: 기본적으로 실패로 간주
+            return { success: false, message: '결과 불명확' };
+          }
         });
 
-        if (result.isSuccess) {
+        if (result.success) {
           console.log(`🎉 워게임 [${title}] 정답 처리됨!`);
-        } else if (result.isFailure) {
-          console.log(`❌ 워게임 [${title}] 플래그 제출 실패(오답이거나 이미 풀었음). 넘어갑니다.`);
         } else {
-          console.log(`⚠️ 워게임 [${title}] 제출 결과를 확인할 수 없습니다.`);
+          console.log(`❌ 워게임 [${title}] 플래그 제출 실패: ${result.message}. 넘어갑니다.`);
         }
       } else {
         console.log('⚠️ 플래그 입력 칸을 찾지 못했습니다.');
