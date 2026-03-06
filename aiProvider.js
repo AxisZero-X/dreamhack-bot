@@ -151,29 +151,40 @@ class AIProvider {
   /**
    * Vision AI 완성 — 이미지(base64 배열)를 포함한 프롬프트 전송
    * Gemini만 data: URL 방식의 inlineData를 지원함.
-   * 실패 시 텍스트 전용 getCompletion()으로 fallback.
+   * 429 시 exponential backoff 재시도 (최대 3회), 실패 시 텍스트 전용 fallback.
    */
   async getCompletionWithVision(prompt, systemPrompt = '당신은 드림핵(Dreamhack) 워게임 보안 문제 풀이 전문 해커입니다.', imageBase64Array = [], mimeType = 'image/png') {
     if (!imageBase64Array || imageBase64Array.length === 0) {
       return this.getCompletion(prompt, systemPrompt);
     }
 
-    // Gemini Vision (inlineData 지원)
+    // Gemini Vision (inlineData 지원) — flash-lite: 30 RPM (flash보다 2배 높음)
     if (this.gemini) {
-      try {
-        console.log(`🖼️ Gemini Vision으로 이미지 ${imageBase64Array.length}장 분석 중...`);
-        const model = this.gemini.getGenerativeModel({ model: 'gemini-2.0-flash' });
-        const parts = [
-          { text: `${systemPrompt}\n\n${prompt}` },
-          ...imageBase64Array.map((b64) => ({ inlineData: { data: b64, mimeType } })),
-        ];
-        const result = await model.generateContent(parts);
-        const text = result.response.text().trim();
-        console.log('✅ [GEMINI VISION] 응답 성공');
-        return text;
-      } catch (err) {
-        const status = err.status || (err.response && err.response.status);
-        console.error(`❌ [GEMINI VISION] 오류 (${status ?? err.message}). 텍스트 전용으로 fallback...`);
+      const model = this.gemini.getGenerativeModel({ model: 'gemini-2.0-flash-lite' });
+      const parts = [
+        { text: `${systemPrompt}\n\n${prompt}` },
+        ...imageBase64Array.map((b64) => ({ inlineData: { data: b64, mimeType } })),
+      ];
+
+      const maxAttempts = 3;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          console.log(`🖼️ Gemini Vision으로 이미지 ${imageBase64Array.length}장 분석 중... (시도 ${attempt}/${maxAttempts})`);
+          const result = await model.generateContent(parts);
+          const text = result.response.text().trim();
+          console.log('✅ [GEMINI VISION] 응답 성공');
+          return text;
+        } catch (err) {
+          const status = err.status || (err.response && err.response.status);
+          if (status === 429 && attempt < maxAttempts) {
+            const waitMs = attempt * 5000; // 5초, 10초 순차 증가
+            console.warn(`⏳ [GEMINI VISION] 429 Rate limit. ${waitMs / 1000}초 후 재시도 (${attempt}/${maxAttempts})...`);
+            await new Promise((r) => setTimeout(r, waitMs));
+          } else {
+            console.error(`❌ [GEMINI VISION] 오류 (${status ?? err.message}). 텍스트 전용으로 fallback...`);
+            break;
+          }
+        }
       }
     }
 
