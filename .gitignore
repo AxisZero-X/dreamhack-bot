@@ -1,5 +1,6 @@
 node_modules/
 .DS_Store
 .chrome-profile/
+.chrome_profile/
 .env
 logs/

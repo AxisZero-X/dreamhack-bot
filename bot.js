@@ -1,5 +1,5 @@
 const { createCursor } = require('ghost-cursor');
-const { EXAM_URL, DELAY, SELECTORS } = require('./config');
+const { EXAM_URL, DELAY, SELECTORS, SKIP_QUIZ } = require('./config');
 const { launchBrowser, ensureLoggedIn, randomDelay, randomScroll, humanType, getDynamicDelay } = require('./utils');
 const { searchFlagForWargame } = require('./search');
 const aiProvider = require('./aiProvider');
@@ -187,22 +187,29 @@ async function getCurrentCompletionRate(page, curriculumUrl) {
       const isQuiz = await detectQuiz(page);
 
       if (isQuiz) {
-        let unsolvedCount = await solveQuiz(page, cursor);
-        // 미해결 문제가 있으면 최대 2회 재시도
-        for (let retry = 0; retry < 2 && unsolvedCount > 0; retry++) {
-          console.log(`  🔁 미해결 ${unsolvedCount}문제 재시도 (${retry + 1}/2)...`);
-          await randomDelay(500, 1000);
-          unsolvedCount = await solveQuiz(page, cursor);
+        if (SKIP_QUIZ) {
+          console.log('⏭️ 퀴즈 건너뛰기 모드: 퀴즈 페이지 스킵');
+          // 다음 강의로 넘어가기
+          continue;
+        } else {
+          let unsolvedCount = await solveQuiz(page, cursor);
+          // 미해결 문제가 있으면 최대 2회 재시도
+          for (let retry = 0; retry < 2 && unsolvedCount > 0; retry++) {
+            console.log(`  🔁 미해결 ${unsolvedCount}문제 재시도 (${retry + 1}/2)...`);
+            await randomDelay(500, 1000);
+            unsolvedCount = await solveQuiz(page, cursor);
+          }
+          await finishQuiz(page, cursor); // 퀴즈 최종 제출 및 다음 페이지 이동
+          totalMinutes += Math.floor(Math.random() * 8) + 5; // 퀴즈: 5~13분 소요 추정
         }
-        await finishQuiz(page, cursor); // 퀴즈 최종 제출 및 다음 페이지 이동
-        totalMinutes += Math.floor(Math.random() * 8) + 5; // 퀴즈: 5~13분 소요 추정
       } else {
         // === 일반 강의 처리 ===
         let lectureCompleted = false;
+        let dynamicDelay; // 외부 스코프에서 선언
 
         while (!lectureCompleted) {
           // 난이도별 동적 딜레이 적용
-          const dynamicDelay = await getDynamicDelay(page);
+          dynamicDelay = await getDynamicDelay(page);
           console.log(`📖 강의 내용 읽는 중... (난이도: ${dynamicDelay.level}, ${Math.floor(dynamicDelay.min/1000)}~${Math.floor(dynamicDelay.max/1000)}초)`);
           
           await Promise.all([
@@ -222,9 +229,13 @@ async function getCurrentCompletionRate(page, curriculumUrl) {
           }
 
           if (hasQuizInPage) {
-            console.log('💡 강의 내에 퀴즈가 감지되었습니다. 퀴즈 풀이를 시도합니다.');
-            await solveQuiz(page, cursor);
-            await randomDelay(1000, 2000);
+            if (SKIP_QUIZ) {
+              console.log('⏭️ 퀴즈 건너뛰기 모드: 강의 내 퀴즈 무시');
+            } else {
+              console.log('💡 강의 내에 퀴즈가 감지되었습니다. 퀴즈 풀이를 시도합니다.');
+              await solveQuiz(page, cursor);
+              await randomDelay(1000, 2000);
+            }
           }
 
           // 페이지 하단의 '진행하기' 혹은 '다음 주제로' 버튼 클릭 (이동이 발생할 수 있음)
@@ -296,9 +307,13 @@ async function getCurrentCompletionRate(page, curriculumUrl) {
         console.log(`📝 수료 퀴즈 URL: ${resolvedExamUrl}`);
         await page.goto(resolvedExamUrl, { waitUntil: 'networkidle2' });
         await randomDelay(2000, 4000);
-        await solveQuiz(page, cursor);
-        await finishQuiz(page, cursor); // 최종 제출 처리 추가
-        console.log('✅ 수료 퀴즈 응시 완료');
+        if (SKIP_QUIZ) {
+          console.log('⏭️ 퀴즈 건너뛰기 모드: 수료 퀴즈 스킵');
+        } else {
+          await solveQuiz(page, cursor);
+          await finishQuiz(page, cursor); // 최종 제출 처리 추가
+          console.log('✅ 수료 퀴즈 응시 완료');
+        }
       } else {
         console.log('⚠️ 수료 퀴즈 링크를 찾지 못했습니다. EXAM_URL을 .env에 설정하세요.');
       }
@@ -366,15 +381,53 @@ async function getCurrentCompletionRate(page, curriculumUrl) {
 })();
 
 /**
- * 퀴즈 페이지 감지
+ * 퀴즈 페이지 감지 (강화된 버전)
  */
 async function detectQuiz(page) {
   try {
-    await page.waitForSelector(SELECTORS.QUIZ_TITLE, { timeout: 3000 });
-    console.log('📝 퀴즈 페이지 감지됨!');
+    // 1. 기본 셀렉터로 시도
+    await page.waitForSelector(SELECTORS.QUIZ_TITLE, { timeout: 5000 });
+    console.log('📝 퀴즈 페이지 감지됨! (기본 셀렉터)');
     return true;
   } catch {
-    return false;
+    // 2. 대체 셀렉터 시도
+    try {
+      await page.waitForSelector('.quiz-title, .quiz-header, [class*="quiz"] h1, [class*="quiz"] h2', { timeout: 3000 });
+      console.log('📝 퀴즈 페이지 감지됨! (대체 셀렉터)');
+      return true;
+    } catch {
+      // 3. 텍스트 기반 검색
+      const hasQuizText = await page.evaluate(() => {
+        const bodyText = document.body.innerText.toLowerCase();
+        return bodyText.includes('quiz') || 
+               bodyText.includes('퀴즈') || 
+               bodyText.includes('문제') ||
+               bodyText.includes('question');
+      });
+      
+      if (hasQuizText) {
+        console.log('📝 퀴즈 페이지 감지됨! (텍스트 기반)');
+        return true;
+      }
+      
+      return false;
+    }
+  }
+}
+
+/**
+ * 스크린샷 디버깅 (퀴즈 stuck 시 자동 캡처)
+ */
+async function takeDebugScreenshot(page, context = 'quiz_stuck') {
+  try {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const screenshotPath = `./logs/debug_${context}_${timestamp}.png`;
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+    console.log(`📸 디버그 스크린샷 저장: ${screenshotPath}`);
+    return screenshotPath;
+  } catch (error) {
+    console.log(`⚠️ 스크린샷 캡처 실패: ${error.message}`);
+    return null;
   }
 }
 
@@ -573,16 +626,43 @@ async function solveQuiz(page, cursor) {
     const triedTexts = new Set();
     const MAX_ATTEMPTS = 15;
 
-    // 현재 보기 텍스트 목록 읽기 (셔플 후 매번 호출)
+    // 현재 보기 텍스트 목록 읽기 (셔플 후 매번 호출) - 강화된 버전
     const getChoiceTexts = async () => {
       return page.evaluate((idx) => {
         const qs = Array.from(document.querySelectorAll('.quiz-question'));
         const visibleQs = qs.filter(el => el.offsetParent !== null);
-          const q = visibleQs.length > 1 ? qs[idx] : (visibleQs[0] || qs[idx] || qs[0]);
+        const q = visibleQs.length > 1 ? qs[idx] : (visibleQs[0] || qs[idx] || qs[0]);
         if (!q) return [];
-        return Array.from(q.querySelectorAll('.choice'))
-          .filter(el => (el.offsetParent !== null))
-          .map(el => el.innerText.trim());
+        
+        // 다양한 선택자로 보기 찾기
+        const choiceSelectors = [
+          '.choice',
+          '.quiz-choice',
+          '.choice-item',
+          '.option',
+          '.answer-option',
+          '[class*="choice"]',
+          '[class*="option"]',
+          '.el-radio',
+          '.el-checkbox',
+          'input[type="radio"] + label',
+          'input[type="checkbox"] + label'
+        ];
+        
+        const allChoices = [];
+        choiceSelectors.forEach(selector => {
+          const elements = q.querySelectorAll(selector);
+          elements.forEach(el => {
+            if (el.offsetParent !== null) {
+              const text = el.innerText.trim();
+              if (text && !allChoices.includes(text)) {
+                allChoices.push(text);
+              }
+            }
+          });
+        });
+        
+        return allChoices;
       }, qIndex);
     };
 
