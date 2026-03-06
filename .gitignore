@@ -4,3 +4,11 @@ node_modules/
 .chrome_profile/
 .env
 logs/
+
+# 디버그 아티팩트
+*.log
+*.pid
+*.html
+*.png
+!README.md
+tryChoiceTexts_output.txt
