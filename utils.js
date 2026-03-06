@@ -131,19 +131,35 @@ async function humanType(page, selector, text, options = {}) {
 }
 
 /**
- * 드림핵 로그인 확인 및 수행
+ * 드림핵 로그인 확인 및 수행 (개선된 버전)
  */
 async function ensureLoggedIn(page, email, password) {
   const currentUrl = page.url();
   
-  // 이미 로그인된 상태인지 확인
+  // 이미 로그인된 상태인지 확인 (다양한 셀렉터로 시도)
   if (currentUrl.includes('dreamhack.io') && !currentUrl.includes('/login')) {
     try {
-      await page.waitForSelector('.user-info, [data-testid="user-menu"]', { timeout: 5000 });
+      // 다양한 로그인 성공 셀렉터 시도
+      const loginSelectors = [
+        '.user-info',
+        '[data-testid="user-menu"]',
+        '.user-menu',
+        '[class*="user"]',
+        '.avatar',
+        '.profile',
+        '.el-dropdown', // 드림핵에서 사용하는 드롭다운 메뉴
+        'img[src*="avatar"]',
+        'button:has(svg)', // 아이콘 버튼
+        'header button', // 헤더의 버튼
+        '.header-actions button'
+      ];
+      
+      // 3초 내에 로그인 상태 확인 시도
+      await page.waitForSelector(loginSelectors.join(', '), { timeout: 3000 });
       logger.info('✅ 이미 로그인된 상태입니다.');
       return;
     } catch {
-      // 로그인 필요
+      // 로그인 필요 - 계속 진행
     }
   }
   
@@ -153,26 +169,131 @@ async function ensureLoggedIn(page, email, password) {
   await page.goto('https://dreamhack.io/login', { waitUntil: 'networkidle2' });
   await randomDelay(2000, 4000);
   
-  // 이메일 입력
-  await page.waitForSelector('input[type="email"], input[name="email"]', { timeout: 10000 });
-  await humanType(page, 'input[type="email"], input[name="email"]', email);
+  // 이메일 입력 필드 찾기 (다양한 셀렉터 시도)
+  const emailSelectors = [
+    'input[type="email"]',
+    'input[name="email"]',
+    'input[placeholder*="이메일"]',
+    'input[placeholder*="Email"]',
+    '#email',
+    '.email-input'
+  ];
+  
+  try {
+    await page.waitForSelector(emailSelectors.join(', '), { timeout: 10000 });
+    await humanType(page, emailSelectors.join(', '), email);
+  } catch (error) {
+    logger.error('❌ 이메일 입력 필드를 찾을 수 없습니다.');
+    throw error;
+  }
+  
   await randomDelay(500, 1000);
   
-  // 비밀번호 입력
-  await humanType(page, 'input[type="password"], input[name="password"]', password);
+  // 비밀번호 입력 필드 찾기
+  const passwordSelectors = [
+    'input[type="password"]',
+    'input[name="password"]',
+    'input[placeholder*="비밀번호"]',
+    'input[placeholder*="Password"]',
+    '#password',
+    '.password-input'
+  ];
+  
+  try {
+    await page.waitForSelector(passwordSelectors.join(', '), { timeout: 5000 });
+    await humanType(page, passwordSelectors.join(', '), password);
+  } catch (error) {
+    logger.error('❌ 비밀번호 입력 필드를 찾을 수 없습니다.');
+    throw error;
+  }
+  
   await randomDelay(500, 1000);
   
   // 로그인 버튼 클릭
-  await page.click('button[type="submit"], .login-button, .el-button--primary');
+  const loginButtonSelectors = [
+    'button[type="submit"]',
+    '.login-button',
+    '.el-button--primary',
+    'button:contains("로그인")',
+    'button:contains("Login")',
+    '.submit-button'
+  ];
+  
+  try {
+    await page.waitForSelector(loginButtonSelectors.join(', '), { timeout: 5000 });
+    await page.click(loginButtonSelectors.join(', '));
+  } catch (error) {
+    logger.error('❌ 로그인 버튼을 찾을 수 없습니다.');
+    throw error;
+  }
+  
   await randomDelay(3000, 6000);
   
-  // 로그인 성공 확인
+  // 로그인 성공 확인 (다양한 방법으로 시도)
+  let loginSuccess = false;
+  let errorMessage = '';
+  
+  // 방법 1: 다양한 셀렉터로 로그인 상태 확인
+  const successSelectors = [
+    '.user-info',
+    '[data-testid="user-menu"]',
+    '.user-menu',
+    '[class*="user"]',
+    '.avatar',
+    '.profile',
+    '.el-dropdown',
+    'img[src*="avatar"]',
+    'header button',
+    '.header-actions button'
+  ];
+  
   try {
-    await page.waitForSelector('.user-info, [data-testid="user-menu"]', { timeout: 10000 });
-    logger.info('✅ 로그인 성공!');
+    await page.waitForSelector(successSelectors.join(', '), { timeout: 15000 });
+    logger.info('✅ 로그인 성공! (셀렉터 확인)');
+    loginSuccess = true;
   } catch (error) {
-    logger.error('❌ 로그인 실패. 수동으로 확인해주세요.');
-    throw error;
+    errorMessage = `셀렉터 확인 실패: ${error.message}`;
+  }
+  
+  // 방법 2: URL 확인 (로그인 후 특정 페이지로 이동하는지)
+  if (!loginSuccess) {
+    const newUrl = page.url();
+    if (!newUrl.includes('/login') && newUrl.includes('dreamhack.io')) {
+      logger.info('✅ 로그인 성공! (URL 확인)');
+      loginSuccess = true;
+    } else {
+      errorMessage += ` | URL 확인 실패: ${newUrl}`;
+    }
+  }
+  
+  // 방법 3: 페이지 텍스트 확인 (로그인 실패 메시지가 없는지)
+  if (!loginSuccess) {
+    const pageText = await page.evaluate(() => document.body.innerText);
+    const failureKeywords = ['잘못된', '틀렸', '오류', '실패', 'error', 'invalid', 'incorrect'];
+    const hasFailure = failureKeywords.some(keyword => pageText.toLowerCase().includes(keyword));
+    
+    if (!hasFailure) {
+      logger.info('✅ 로그인 성공! (텍스트 확인)');
+      loginSuccess = true;
+    } else {
+      errorMessage += ` | 텍스트 확인 실패: 실패 키워드 발견`;
+    }
+  }
+  
+  if (!loginSuccess) {
+    logger.error(`❌ 로그인 실패. 수동으로 확인해주세요. 에러: ${errorMessage}`);
+    
+    // 디버깅을 위한 스크린샷 캡처
+    try {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const screenshotPath = `./logs/login_failure_${timestamp}.png`;
+      await page.screenshot({ path: screenshotPath, fullPage: true });
+      logger.info(`📸 로그인 실패 스크린샷 저장: ${screenshotPath}`);
+    } catch (screenshotError) {
+      logger.warn(`⚠️ 스크린샷 캡처 실패: ${screenshotError.message}`);
+    }
+    
+    throw new Error(`로그인 실패: ${errorMessage}`);
   }
 }
 
