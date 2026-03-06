@@ -1,92 +1,187 @@
 const OpenAI = require('openai');
+const Groq = require('groq-sdk');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
 class AIProvider {
   constructor() {
-    this.deepseek = null;
-    this.isAvailable = false;
+    this.providers = []; // 우선순위 순서로 등록
 
-    // .env 파일에서 직접 API 키 읽기 (시스템 환경 변수 우회)
-    const apiKey = this.readApiKeyFromEnvFile();
-    
-    if (apiKey) {
-      const trimmedKey = apiKey.trim();
-      if (trimmedKey && trimmedKey.startsWith('sk-') && trimmedKey.length > 10) {
-        this.deepseek = new OpenAI({
-          apiKey: trimmedKey,
-          baseURL: 'https://api.deepseek.com'
-        });
-        console.log('✅ DeepSeek Provider Initialized (from .env file)');
-        this.isAvailable = true;
-      } else {
-        console.warn('⚠️ DEEPSEEK_API_KEY 형식이 올바르지 않습니다. AI 기능을 사용할 수 없습니다.');
-        this.isAvailable = false;
-      }
+    const env = this._readEnvFile();
+
+    // 1순위: Groq (무료, 빠름)
+    const groqKey = env.GROQ_API_KEY || process.env.GROQ_API_KEY;
+    if (groqKey && groqKey.trim().startsWith('gsk_')) {
+      this.groq = new Groq({ apiKey: groqKey.trim() });
+      this.providers.push('groq');
+      console.log('✅ Groq Provider Initialized');
+    }
+
+    // 2순위: Gemini (무료 티어)
+    const geminiKey = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+    if (geminiKey && geminiKey.trim().length > 10) {
+      this.gemini = new GoogleGenerativeAI(geminiKey.trim());
+      this.providers.push('gemini');
+      console.log('✅ Gemini Provider Initialized');
+    }
+
+    // 3순위: DeepSeek (유료)
+    const deepseekKey = env.DEEPSEEK_API_KEY || process.env.DEEPSEEK_API_KEY;
+    if (deepseekKey && deepseekKey.trim().startsWith('sk-') && deepseekKey.trim().length > 10) {
+      this.deepseek = new OpenAI({
+        apiKey: deepseekKey.trim(),
+        baseURL: 'https://api.deepseek.com',
+      });
+      this.providers.push('deepseek');
+      console.log('✅ DeepSeek Provider Initialized');
+    }
+
+    this.isAvailable = this.providers.length > 0;
+    if (!this.isAvailable) {
+      console.warn('⚠️ 사용 가능한 AI 프로바이더가 없습니다. AI 기능을 사용할 수 없습니다.');
     } else {
-      console.warn('⚠️ DEEPSEEK_API_KEY not found in .env file');
-      this.isAvailable = false;
+      console.log(`🤖 AI 프로바이더 우선순위: ${this.providers.join(' → ')}`);
     }
   }
 
-  // .env 파일에서 직접 API 키 읽기
-  readApiKeyFromEnvFile() {
+  _readEnvFile() {
     try {
       const envPath = path.join(__dirname, '.env');
-      if (fs.existsSync(envPath)) {
-        const content = fs.readFileSync(envPath, 'utf8');
-        const lines = content.split('\n');
-        
-        for (const line of lines) {
-          if (line.trim().startsWith('DEEPSEEK_API_KEY=')) {
-            let apiKey = line.split('=')[1].trim();
-            // 따옴표 제거
-            apiKey = apiKey.replace(/^['"]|['"]$/g, '');
-            return apiKey;
-          }
-        }
+      if (!fs.existsSync(envPath)) return {};
+      const content = fs.readFileSync(envPath, 'utf8');
+      const result = {};
+      for (const line of content.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx === -1) continue;
+        const key = trimmed.slice(0, eqIdx).trim();
+        let val = trimmed.slice(eqIdx + 1).trim();
+        val = val.replace(/^['"']|['"']$/g, '');
+        result[key] = val;
       }
+      return result;
     } catch (err) {
       console.warn('⚠️ .env 파일 읽기 오류:', err.message);
+      return {};
     }
-    
-    // .env 파일에서 찾지 못하면 기존 방식으로 fallback
-    return process.env.DEEPSEEK_API_KEY;
   }
 
-  async getCompletion(prompt, systemPrompt = "You are a helpful assistant.") {
-    if (!this.deepseek || !this.isAvailable) {
-      console.warn('⚠️ AI provider not available. Falling back to brute-force mode.');
+  // Groq으로 완성 시도
+  async _tryGroq(prompt, systemPrompt) {
+    console.log('🤖 Attempting completion with Groq...');
+    const response = await this.groq.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt },
+      ],
+      max_tokens: 1024,
+      temperature: 0.2,
+    });
+    return response.choices[0].message.content.trim();
+  }
+
+  // Gemini로 완성 시도
+  async _tryGemini(prompt, systemPrompt) {
+    console.log('🤖 Attempting completion with Gemini...');
+    const model = this.gemini.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const result = await model.generateContent(`${systemPrompt}\n\n${prompt}`);
+    return result.response.text().trim();
+  }
+
+  // DeepSeek으로 완성 시도
+  async _tryDeepSeek(prompt, systemPrompt) {
+    console.log('🤖 Attempting completion with DeepSeek...');
+    const response = await this.deepseek.chat.completions.create({
+      model: 'deepseek-chat',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt },
+      ],
+      max_tokens: 1024,
+      temperature: 0.2,
+    });
+    return response.choices[0].message.content.trim();
+  }
+
+  /**
+   * 등록된 프로바이더를 순서대로 시도, 모두 실패하면 null 반환
+   */
+  async getCompletion(prompt, systemPrompt = '당신은 드림핵(Dreamhack) 워게임 보안 문제 풀이 전문가입니다.') {
+    if (!this.isAvailable) {
+      console.warn('⚠️ AI provider not available.');
       return null;
     }
 
-    try {
-      console.log('🤖 Attempting completion with DeepSeek...');
-      const response = await this.deepseek.chat.completions.create({
-        model: 'deepseek-chat',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: prompt }
-        ],
-        max_tokens: 1024,
-        temperature: 0.7
-      });
-      return response.choices[0].message.content.trim();
-    } catch (error) {
-      // 401 인증 실패 또는 기타 API 에러 처리
-      if (error.status === 401 || error.message.includes('Authentication Fails')) {
-        console.error('❌ DeepSeek API 인증 실패: API 키가 유효하지 않습니다. 브루트포스 모드로 전환합니다.');
-        console.error('💡 해결 방법: https://platform.deepseek.com/api_keys 에서 새 API 키를 발급받아 .env 파일에 DEEPSEEK_API_KEY로 설정하세요.');
-        this.isAvailable = false; // 이후 호출에서도 AI 사용 안 함
-      } else {
-        console.error('❌ DeepSeek Error:', error.message);
+    for (const provider of this.providers) {
+      try {
+        let result = null;
+        if (provider === 'groq') result = await this._tryGroq(prompt, systemPrompt);
+        else if (provider === 'gemini') result = await this._tryGemini(prompt, systemPrompt);
+        else if (provider === 'deepseek') result = await this._tryDeepSeek(prompt, systemPrompt);
+
+        if (result) {
+          console.log(`✅ [${provider.toUpperCase()}] 응답 성공`);
+          return result;
+        }
+      } catch (error) {
+        const status = error.status || error.statusCode || (error.response && error.response.status);
+        if (status === 402) {
+          console.error(`❌ [${provider.toUpperCase()}] 잔액 부족 (402). 다음 프로바이더로 전환...`);
+        } else if (status === 429) {
+          console.warn(`⚠️ [${provider.toUpperCase()}] 요청 한도 초과 (429). 다음 프로바이더로 전환...`);
+        } else if (status === 401) {
+          console.error(`❌ [${provider.toUpperCase()}] 인증 실패 (401) - API 키를 확인하세요. 다음 프로바이더로 전환...`);
+        } else if (status >= 500) {
+          console.error(`⚠️ [${provider.toUpperCase()}] 서버 오류 (${status}). 다음 프로바이더로 전환...`);
+        } else {
+          console.error(`❌ [${provider.toUpperCase()}] 오류: ${error.message}`);
+        }
+        // 다음 프로바이더로 계속
       }
-      return null; // AI 실패 시 null 반환하여 브루트포스로 폴백
     }
+
+    console.error('❌ 모든 AI 프로바이더 실패. null 반환.');
+    return null;
   }
 
-  // AI 사용 가능 여부 확인
+  /**
+   * Vision AI 완성 — 이미지(base64 배열)를 포함한 프롬프트 전송
+   * Gemini만 data: URL 방식의 inlineData를 지원함.
+   * 실패 시 텍스트 전용 getCompletion()으로 fallback.
+   */
+  async getCompletionWithVision(prompt, systemPrompt = '당신은 드림핵(Dreamhack) 워게임 보안 문제 풀이 전문 해커입니다.', imageBase64Array = [], mimeType = 'image/png') {
+    if (!imageBase64Array || imageBase64Array.length === 0) {
+      return this.getCompletion(prompt, systemPrompt);
+    }
+
+    // Gemini Vision (inlineData 지원)
+    if (this.gemini) {
+      try {
+        console.log(`🖼️ Gemini Vision으로 이미지 ${imageBase64Array.length}장 분석 중...`);
+        const model = this.gemini.getGenerativeModel({ model: 'gemini-2.0-flash' });
+        const parts = [
+          { text: `${systemPrompt}\n\n${prompt}` },
+          ...imageBase64Array.map((b64) => ({ inlineData: { data: b64, mimeType } })),
+        ];
+        const result = await model.generateContent(parts);
+        const text = result.response.text().trim();
+        console.log('✅ [GEMINI VISION] 응답 성공');
+        return text;
+      } catch (err) {
+        const status = err.status || (err.response && err.response.status);
+        console.error(`❌ [GEMINI VISION] 오류 (${status ?? err.message}). 텍스트 전용으로 fallback...`);
+      }
+    }
+
+    // fallback: 텍스트만으로 다른 프로바이더 시도
+    console.warn('⚠️ Vision 분석 실패. 텍스트 전용으로 fallback.');
+    return this.getCompletion(prompt, systemPrompt);
+  }
+
   isAIAvailable() {
     return this.isAvailable;
   }

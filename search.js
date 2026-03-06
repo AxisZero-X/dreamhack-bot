@@ -10,75 +10,123 @@ const { randomDelay } = require('./utils');
 async function searchFlagForWargame(page, title) {
   console.log(`\n🕵️ [웹 검색] "${title}" 문제의 플래그를 인터넷에서 검색합니다...`);
 
-  // 검색할 블로그 플랫폼 필터 (이 플랫폼들에 롸이트업이 주로 올라옴)
-  // 워게임 제목의 경우 특수문자가 포함될 수 있으므로 따옴표로 감쌈.
-  const searchQuery = `site:tistory.com OR site:velog.io OR site:github.io dreamhack "${title}" ("DH{" OR "flag" OR "롸이트업" OR "writeup")`;
+  // 다양한 검색 쿼리 생성 (더 많은 결과를 얻기 위해)
+  const searchQueries = [
+    // 기본 쿼리: 정확한 제목 검색
+    `"${title}" dreamhack writeup OR 롸이트업 OR 풀이 OR solution`,
+    // 영어 제목이 있을 경우를 대비한 쿼리
+    `dreamhack "${title}" DH{ OR flag`,
+    // 더 넓은 범위의 검색
+    `dreamhack wargame "${title}" solution`,
+    // 한국어 블로그 중심 검색
+    `드림핵 "${title}" 풀이 OR 해설`,
+  ];
+
+  // 검색할 사이트 목록 확장
+  const siteFilters = [
+    'site:tistory.com',
+    'site:velog.io', 
+    'site:github.io',
+    'site:blog.naver.com',
+    'site:brunch.co.kr',
+    'site:medium.com',
+    'site:dev.to',
+    'site:hatenablog.com'
+  ];
 
   let foundFlag = null;
 
-  // 1. Google 검색 시도 (가장 정확도가 높음, 캡챠 걸리면 넘어감)
-  console.log(`🔍 Google에서 검색 시도 중...`);
-  try {
-    await page.goto(`https://www.google.com/search?q=` + encodeURIComponent(searchQuery), { waitUntil: 'domcontentloaded' });
-    await randomDelay(1000, 2000);
+  // 각 검색 엔진별로 시도
+  const searchEngines = [
+    { name: 'Google', url: 'https://www.google.com/search?q=', captchaCheck: '비정상적인 트래픽' },
+    { name: 'Naver', url: 'https://search.naver.com/search.naver?query=', captchaCheck: null },
+    { name: 'Bing', url: 'https://www.bing.com/search?q=', captchaCheck: null },
+    { name: 'DuckDuckGo', url: 'https://duckduckgo.com/?q=', captchaCheck: null }
+  ];
 
-    const isCaptcha = await page.evaluate(() => document.body.innerText.includes('비정상적인 트래픽'));
-    if (isCaptcha) {
-      console.log('⚠️ Google 캡챠가 감지되었습니다. 다른 검색 엔진으로 전환합니다.');
-    } else {
-      const googleLinks = await page.$$eval('#search a', links =>
-        links.map(a => a.href).filter(href => href && !href.includes('google.com') && (href.includes('tistory.com') || href.includes('velog.io') || href.includes('github.io')))
-      );
-      const uniqueGoogleLinks = [...new Set(googleLinks)];
+  // 각 검색 쿼리별로 시도
+  for (const query of searchQueries) {
+    if (foundFlag) break;
+    
+    // 사이트 필터와 쿼리 결합
+    const siteQuery = siteFilters.join(' OR ');
+    const fullQuery = `(${siteQuery}) (${query})`;
+    
+    console.log(`🔍 검색 쿼리: ${fullQuery.substring(0, 100)}...`);
+    
+    for (const engine of searchEngines) {
+      if (foundFlag) break;
+      
+      console.log(`  🔎 ${engine.name}에서 검색 시도 중...`);
+      try {
+        await page.goto(engine.url + encodeURIComponent(fullQuery), { 
+          waitUntil: 'domcontentloaded',
+          timeout: 10000 
+        });
+        await randomDelay(1500, 2500);
 
-      console.log(`📑 Google에서 ${uniqueGoogleLinks.length}개의 관련 포스트를 찾았습니다.`);
-      foundFlag = await extractFlagFromLinks(page, uniqueGoogleLinks);
-    }
-  } catch (err) {
-    console.log(`⚠️ Google 검색 중 에러: ${err.message}`);
-  }
+        // 캡챠 체크
+        if (engine.captchaCheck) {
+          const isCaptcha = await page.evaluate((text) => document.body.innerText.includes(text), engine.captchaCheck);
+          if (isCaptcha) {
+            console.log(`  ⚠️ ${engine.name} 캡챠가 감지되었습니다. 다음 검색 엔진으로 전환합니다.`);
+            continue;
+          }
+        }
 
-  // 2. 네이버 검색 시도 (Google 실패 시)
-  if (!foundFlag) {
-    console.log(`🔍 Naver에서 검색 시도 중...`);
-    try {
-      await page.goto(`https://search.naver.com/search.naver?query=` + encodeURIComponent(searchQuery), { waitUntil: 'domcontentloaded' });
-      await randomDelay(1000, 2000);
+        // 검색 결과 링크 추출 (엔진별 셀렉터)
+        let links = [];
+        if (engine.name === 'Google') {
+          links = await page.$$eval('#search a', anchors =>
+            anchors.map(a => a.href).filter(href => 
+              href && 
+              !href.includes('google.com') && 
+              !href.includes('webcache.googleusercontent.com') &&
+              (href.includes('tistory.com') || href.includes('velog.io') || href.includes('github.io') || 
+               href.includes('blog.naver.com') || href.includes('brunch.co.kr') || href.includes('medium.com') ||
+               href.includes('dev.to') || href.includes('hatenablog.com'))
+            )
+          );
+        } else if (engine.name === 'Naver') {
+          links = await page.$$eval('.title_link, a.api_txt_lines, a.name, .lnk_tit, .total_tit', anchors =>
+            anchors.map(a => a.href).filter(href => {
+              if (!href || href.includes('search.naver.com') || href.includes('nid.naver.com') || 
+                  href.includes('shopping.naver.com') || href.includes('dict.naver.com') || 
+                  href.includes('map.naver.com') || href.includes('terms.naver.com') || 
+                  href.includes('academic.naver.com')) return false;
+              return href.includes('tistory.com') || href.includes('velog.io') || href.includes('github.io') ||
+                     href.includes('blog.naver.com') || href.includes('brunch.co.kr');
+            })
+          );
+        } else if (engine.name === 'Bing') {
+          links = await page.$$eval('h2 a, .b_algo h2 a, .b_title h2 a', anchors =>
+            anchors.map(a => a.href).filter(href => 
+              href && (href.includes('tistory.com') || href.includes('velog.io') || href.includes('github.io') ||
+                      href.includes('blog.naver.com') || href.includes('brunch.co.kr') || href.includes('medium.com'))
+            )
+          );
+        } else if (engine.name === 'DuckDuckGo') {
+          links = await page.$$eval('.result__title a, .result-title a', anchors =>
+            anchors.map(a => a.href).filter(href => 
+              href && (href.includes('tistory.com') || href.includes('velog.io') || href.includes('github.io') ||
+                      href.includes('blog.naver.com') || href.includes('brunch.co.kr') || href.includes('medium.com'))
+            )
+          );
+        }
 
-      // Naver의 검색 결과 블로그 링크는 주로 '.title_link' 나 '.api_txt_lines.total_tit'에 있음
-      const naverLinks = await page.$$eval('.title_link, a.api_txt_lines, a.name, .lnk_tit', links =>
-        links.map(a => a.href).filter(href => {
-          if (!href || href.includes('search.naver.com') || href.includes('nid.naver.com') || href.includes('shopping.naver.com') || href.includes('dict.naver.com') || href.includes('map.naver.com') || href.includes('terms.naver.com') || href.includes('academic.naver.com')) return false;
-          return href.includes('tistory.com') || href.includes('velog.io') || href.includes('github.io');
-        })
-      );
-      const uniqueNaverLinks = [...new Set(naverLinks)];
+        const uniqueLinks = [...new Set(links)].slice(0, 10); // 상위 10개만 확인
+        console.log(`  📑 ${engine.name}에서 ${uniqueLinks.length}개의 관련 포스트를 찾았습니다.`);
 
-      console.log(`📑 Naver에서 ${uniqueNaverLinks.length}개의 관련 포스트를 찾았습니다.`);
-
-      foundFlag = await extractFlagFromLinks(page, uniqueNaverLinks);
-    } catch (err) {
-      console.log(`⚠️ Naver 검색 중 에러: ${err.message}`);
-    }
-  }
-
-  // 3. 빙 검색 시도 (네이버에서도 못 찾았을 경우)
-  if (!foundFlag) {
-    console.log(`🔍 Bing에서 검색 시도 중...`);
-    try {
-      await page.goto(`https://www.bing.com/search?q=` + encodeURIComponent(searchQuery), { waitUntil: 'domcontentloaded' });
-      await randomDelay(1000, 2000);
-
-      const bingLinks = await page.$$eval('h2 a', links =>
-        links.map(a => a.href).filter(href => href.includes('tistory.com') || href.includes('velog.io') || href.includes('github.io'))
-      );
-      const uniqueBingLinks = [...new Set(bingLinks)];
-
-      console.log(`📑 Bing에서 ${uniqueBingLinks.length}개의 관련 포스트를 찾았습니다.`);
-
-      foundFlag = await extractFlagFromLinks(page, uniqueBingLinks);
-    } catch (err) {
-      console.log(`⚠️ Bing 검색 중 에러: ${err.message}`);
+        if (uniqueLinks.length > 0) {
+          foundFlag = await extractFlagFromLinks(page, uniqueLinks);
+          if (foundFlag) {
+            console.log(`  🎉 ${engine.name}에서 플래그를 찾았습니다!`);
+            break;
+          }
+        }
+      } catch (err) {
+        console.log(`  ⚠️ ${engine.name} 검색 중 에러: ${err.message}`);
+      }
     }
   }
 
@@ -86,6 +134,42 @@ async function searchFlagForWargame(page, title) {
     console.log(`🎉 웹 검색으로 플래그를 찾았습니다: ${foundFlag}`);
   } else {
     console.log(`⚠️ 웹 검색으로 플래그를 찾지 못했습니다.`);
+    
+    // 추가적으로 GitHub에서 직접 검색 시도
+    console.log(`🔍 GitHub에서 직접 검색 시도 중...`);
+    try {
+      const githubQuery = `dreamhack ${title} DH{`;
+      await page.goto(`https://github.com/search?q=` + encodeURIComponent(githubQuery) + `&type=code`, { 
+        waitUntil: 'domcontentloaded',
+        timeout: 10000 
+      });
+      await randomDelay(2000, 3000);
+      
+      // GitHub 코드 검색 결과에서 플래그 찾기
+      const githubFlag = await page.evaluate(() => {
+        const codeElements = document.querySelectorAll('.blob-code-inner');
+        for (const el of codeElements) {
+          const text = el.textContent;
+          const match = text.match(/DH\{[^}]+\}/);
+          if (match) {
+            const flag = match[0];
+            // 더미 플래그 필터링
+            if (!flag.includes('...') && !flag.toLowerCase().includes('flag') && 
+                !flag.includes('플래그') && flag.length > 8) {
+              return flag;
+            }
+          }
+        }
+        return null;
+      });
+      
+      if (githubFlag) {
+        console.log(`🎉 GitHub 코드 검색에서 플래그를 찾았습니다: ${githubFlag}`);
+        foundFlag = githubFlag;
+      }
+    } catch (err) {
+      console.log(`⚠️ GitHub 검색 중 에러: ${err.message}`);
+    }
   }
 
   return foundFlag;
@@ -95,30 +179,109 @@ async function searchFlagForWargame(page, title) {
  * 주어진 링크 목록을 순회하며 플래그 형식을 추출
  */
 async function extractFlagFromLinks(page, links) {
-  for (let i = 0; i < Math.min(7, links.length); i++) {
+  for (let i = 0; i < Math.min(10, links.length); i++) {
     const url = links[i];
-    console.log(`  👀 탐색 중: ${url}`);
+    console.log(`  👀 탐색 중 [${i + 1}/${Math.min(10, links.length)}]: ${url}`);
     try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 5000 });
-      await randomDelay(500, 1000);
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 8000 });
+      await randomDelay(800, 1500);
 
-      const pageText = await page.evaluate(() => document.body.innerText);
-
-      // DH{ ... } 형식 찾기
-      const matches = pageText.match(/DH\{[^}]+\}/g) || [];
+      // 페이지 텍스트와 HTML 모두에서 검색
+      const pageData = await page.evaluate(() => {
+        const bodyText = document.body.innerText;
+        const htmlContent = document.body.innerHTML;
+        
+        // 다양한 플래그 패턴 검색
+        const patterns = [
+          /DH\{[^}]+\}/g,  // 기본 DH{...} 형식
+          /FLAG\{[^}]+\}/gi, // FLAG{...} 형식
+          /flag\{[^}]+\}/g,  // flag{...} 형식
+          /dh\{[^}]+\}/g,    // dh{...} 형식 (소문자)
+          /Dreamhack\{[^}]+\}/gi, // Dreamhack{...} 형식
+        ];
+        
+        const allMatches = [];
+        patterns.forEach(pattern => {
+          const matches = bodyText.match(pattern) || [];
+          allMatches.push(...matches);
+        });
+        
+        // HTML에서도 추가 검색 (코드 블록 내에 있을 수 있음)
+        const codeBlocks = document.querySelectorAll('pre, code, .hljs, .language-*');
+        let codeText = '';
+        codeBlocks.forEach(block => {
+          codeText += block.textContent + '\n';
+        });
+        
+        patterns.forEach(pattern => {
+          const matches = codeText.match(pattern) || [];
+          allMatches.push(...matches);
+        });
+        
+        return {
+          text: bodyText,
+          html: htmlContent,
+          matches: [...new Set(allMatches)] // 중복 제거
+        };
+      });
 
       // 더미 플래그나 플레이스홀더 제외
-      const validMatches = matches.filter(m =>
-        m.length > 5 && // "DH{}" 형태 이상이면 가능성 있음 (최소 5자리로 완화)
-        !m.includes('...') &&
-        !m.toLowerCase().includes('flag') &&
-        !m.includes('플래그') &&
-        !m.includes('어쩌구') &&
-        !m.includes('여기에')
-      );
+      const validMatches = pageData.matches.filter(m => {
+        const flag = m;
+        const lowerFlag = flag.toLowerCase();
+        
+        // 명확한 더미/예시 플래그 제외
+        const dummyPatterns = [
+          '...',
+          'flag',
+          '플래그',
+          '어쩌구',
+          '여기에',
+          'example',
+          '예시',
+          'sample',
+          'test',
+          '더미',
+          'dummy',
+          'placeholder',
+          'dh{}',
+          'flag{}',
+          'dreamhack{}'
+        ];
+        
+        // 너무 짧은 플래그 제외 (최소 8자)
+        if (flag.length < 8) return false;
+        
+        // 더미 패턴이 포함된 경우 제외
+        if (dummyPatterns.some(pattern => lowerFlag.includes(pattern))) {
+          return false;
+        }
+        
+        // 연속된 동일 문자나 너무 단순한 패턴 제외
+        if (/^(.)\1+$/.test(flag.replace(/[{}]/g, ''))) return false;
+        
+        return true;
+      });
 
       if (validMatches.length > 0) {
-        return validMatches[0]; // 첫 번째 유효한 플래그 반환
+        // 가장 긴 플래그 선택 (일반적으로 실제 플래그가 더 길다)
+        const longestFlag = validMatches.reduce((a, b) => a.length > b.length ? a : b);
+        console.log(`  ✅ 유효한 플래그 후보 ${validMatches.length}개 발견, 선택: ${longestFlag}`);
+        return longestFlag;
+      }
+      
+      // 플래그가 직접적으로 표시되지 않았을 경우, 페이지에서 힌트 찾기
+      const hasWriteupKeywords = await page.evaluate(() => {
+        const text = document.body.innerText.toLowerCase();
+        const keywords = [
+          'writeup', '롸이트업', '풀이', '해설', 'solution', 'answer',
+          '정답', '플래그', 'flag', 'dh{', 'dreamhack'
+        ];
+        return keywords.some(keyword => text.includes(keyword));
+      });
+      
+      if (hasWriteupKeywords) {
+        console.log(`  💡 워게임 관련 내용 발견 (플래그는 직접적으로 표시되지 않음)`);
       }
     } catch (e) {
       console.log(`  ❌ 페이지 로드 실패: ${e.message}`);
