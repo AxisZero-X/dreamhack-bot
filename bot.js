@@ -4,6 +4,7 @@ const { launchBrowser, ensureLoggedIn, randomDelay, randomScroll, humanType, get
 const { searchFlagForWargame } = require('./search');
 const aiProvider = require('./aiProvider');
 const readline = require('readline');
+const logger = require('./logger');
 
 /**
  * 커리큘럼 ID 입력 프롬프트
