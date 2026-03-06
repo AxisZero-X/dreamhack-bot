@@ -1,5 +1,5 @@
 const { DELAY, SELECTORS } = require('./config');
-const { randomDelay, randomScroll, getDynamicDelayFromPage } = require('./utils');
+const { randomDelay, randomScroll, adaptiveScroll, getDynamicDelayFromPage } = require('./utils');
 const logger = require('./logger');
 
 /**
@@ -20,10 +20,8 @@ async function processLecture(page, cursor, { skipQuiz = false, detectQuizFn = n
       previousWordCount = dynamicDelay.totalWordCount;
     }
 
-    await Promise.all([
-      randomDelay(dynamicDelay.min, dynamicDelay.max),
-      randomScroll(page),
-    ]);
+    // 적응형 스크롤 수행 (계산된 딜레이 시간 동안 점진적으로 스크롤)
+    await adaptiveScroll(page, Math.floor(Math.random() * (dynamicDelay.max - dynamicDelay.min) + dynamicDelay.min));
 
     // 강의 중간에 삽입된 퀴즈 확인
     if (!skipQuiz && solveQuizFn) {

@@ -208,6 +208,116 @@ async function randomScroll(page) {
 }
 
 /**
+ * 적응형 스크롤 (사용자 읽기 속도에 맞춰 천천히 내려감)
+ * @param {object} page - Puppeteer 페이지 오브젝트
+ * @param {number} durationMs - 전체 스크롤을 수행할 총 시간 (ms)
+ */
+async function adaptiveScroll(page, durationMs) {
+  const startTime = Date.now();
+  const endTime = startTime + durationMs;
+
+  logger.info(`📜 적응형 스크롤 시작 (${Math.floor(durationMs / 1000)}초 동안 수행)`);
+
+  try {
+    while (Date.now() < endTime) {
+      const remainingTime = endTime - Date.now();
+      if (remainingTime < 1000) break;
+
+      const scrollInfo = await page.evaluate(() => {
+        const getInfo = (el) => {
+          const isWin = el === window;
+          return {
+            scrollHeight: isWin ? (document.scrollingElement?.scrollHeight || document.documentElement.scrollHeight) : el.scrollHeight,
+            viewportHeight: isWin ? window.innerHeight : el.clientHeight,
+            currentScroll: isWin ? (window.scrollY || window.pageYOffset) : el.scrollTop,
+            tagName: isWin ? 'WINDOW' : el.tagName,
+            className: isWin ? '' : el.className,
+            element: el
+          };
+        };
+
+        let best = getInfo(window);
+
+        // 만약 창 스크롤이 거의 없다면, 다른 스크롤 가능한 큰 요소를 찾음
+        if (best.scrollHeight <= best.viewportHeight + 50) {
+          const containers = Array.from(document.querySelectorAll('div, section, main, article'));
+          for (const cand of containers) {
+            const info = getInfo(cand);
+            if (info.scrollHeight > info.viewportHeight + 50 && info.viewportHeight > window.innerHeight * 0.5) {
+              if (info.scrollHeight - info.viewportHeight > best.scrollHeight - best.viewportHeight) {
+                best = info;
+              }
+            }
+          }
+        }
+
+        return {
+          scrollHeight: best.scrollHeight,
+          viewportHeight: best.viewportHeight,
+          currentScroll: best.currentScroll,
+          isWindow: best.tagName === 'WINDOW',
+          tagName: best.tagName,
+          className: best.className
+        };
+      });
+
+      const { scrollHeight, viewportHeight, currentScroll, isWindow, className, tagName } = scrollInfo;
+      const maxScroll = scrollHeight - viewportHeight;
+
+      if (maxScroll <= 5) {
+        logger.debug(`ℹ️ 스크롤할 내용이 부족합니다. (Height: ${scrollHeight}, Viewport: ${viewportHeight})`);
+        await randomDelay(Math.min(remainingTime, 5000), Math.min(remainingTime, 8000));
+        continue;
+      }
+
+      // 목표 위치 계산 (시간 경과에 따른 비례 + 약간의 랜덤성)
+      const elapsed = Date.now() - startTime;
+      const timeProgress = elapsed / durationMs;
+
+      // 실제로는 끝까지 다 안 갈 수도 있음을 감안 (인간미)
+      const targetProgress = Math.min(0.98, timeProgress + (Math.random() * 0.15 - 0.05));
+      const targetY = maxScroll * targetProgress;
+
+      let nextY = Math.max(currentScroll, targetY);
+
+      // 아주 가끔 위로 조금 올림
+      if (Math.random() < 0.08 && currentScroll > 300) {
+        nextY = currentScroll - (Math.random() * 200 + 50);
+      }
+
+      nextY = Math.max(0, Math.min(maxScroll, nextY));
+
+      if (Math.abs(nextY - currentScroll) > 10) {
+        logger.debug(`🎢 스크롤 이동: ${Math.round(currentScroll)} -> ${Math.round(nextY)} / ${maxScroll} (${isWindow ? 'Window' : tagName + '.' + className.split(' ')[0]})`);
+
+        await page.evaluate(({ y, isWindow, tagName, className }) => {
+          let el = window;
+          if (!isWindow) {
+            // 클래스나 태그로 근사해서 찾음 (정확한 element 전달이 안되므로)
+            const selector = className ? `${tagName.toLowerCase()}.${className.split(' ').join('.')}` : tagName.toLowerCase();
+            el = document.querySelector(selector) || window;
+          }
+
+          if (el === window) {
+            window.scrollTo({ top: y, behavior: 'smooth' });
+          } else {
+            el.scrollTo({ top: y, behavior: 'smooth' });
+          }
+        }, { y: nextY, isWindow, tagName, className });
+      }
+
+      const wait = Math.min(endTime - Date.now(), Math.floor(Math.random() * 3000) + 2000);
+      if (wait > 500) await randomDelay(wait * 0.8, wait);
+    }
+  } catch (err) {
+    logger.warn(`⚠️ 스크롤 수행 중 오류: ${err.message}`);
+    const left = endTime - Date.now();
+    if (left > 0) await randomDelay(left, left);
+  }
+  logger.info(`✅ 적응형 스크롤 종료`);
+}
+
+/**
  * 인간형 타이핑 (텍스트 입력 모방)
  */
 async function humanType(page, selector, text, options = {}) {
@@ -481,6 +591,7 @@ module.exports = {
   getDynamicDelay,
   getDynamicDelayFromPage,
   randomScroll,
+  adaptiveScroll,
   humanType,
   ensureLoggedIn,
 };
