@@ -50,6 +50,7 @@ async function launchBrowser() {
       '--disable-prompt-on-repost',
       '--disable-background-networking',
       '--disable-component-cloud-policy',
+      '--lang=ko', // 한국어 언어 설정
     ],
   });
   return browser;
@@ -166,7 +167,7 @@ async function ensureLoggedIn(page, email, password) {
   logger.info('🔐 로그인 시도 중...');
   
   // 로그인 페이지로 이동
-  await page.goto('https://dreamhack.io/login', { waitUntil: 'networkidle2' });
+  await page.goto('https://dreamhack.io/users/login', { waitUntil: 'networkidle2' });
   await randomDelay(2000, 4000);
   
   // 이메일 입력 필드 찾기 (다양한 셀렉터 시도)

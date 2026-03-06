@@ -32,13 +32,13 @@ setTimeout(() => {
       '--profile-directory=Default',
       '--no-first-run',
       '--no-default-browser-check',
-      'https://dreamhack.io/login',
+      'https://dreamhack.io/users/login',
     ],
     { stdio: 'ignore', detached: true },
   );
   chrome.unref();
 
-  console.log('✅ Chrome 실행됨. dreamhack.io/login 에서 로그인하세요.');
+  console.log('✅ Chrome 실행됨. dreamhack.io/users/login 에서 로그인하세요.');
   console.log('');
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
