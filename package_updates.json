@@ -1,0 +1,14 @@
+{
+  "dependencies_to_add": {
+    "blessed": "^0.1.81",
+    "blessed-contrib": "^4.11.0"
+  },
+  "scripts_to_add": {
+    "dashboard": "node dashboard.js",
+    "start:with-dashboard": "node bot.js --dashboard"
+  },
+  "devDependencies_to_add": {
+    "@types/blessed": "^0.1.19",
+    "@types/blessed-contrib": "^0.0.35"
+  }
+}

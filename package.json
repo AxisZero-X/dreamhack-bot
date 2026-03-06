@@ -15,6 +15,7 @@
     "puppeteer-core": "^23.0.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "readline-sync": "^1.4.10",
     "winston": "^3.19.0"
   }
 }

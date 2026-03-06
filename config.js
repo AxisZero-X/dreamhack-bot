@@ -10,6 +10,9 @@ const EXAM_URL = process.env.EXAM_URL || null; // 수료 퀴즈 직접 URL (예:
 // --- 퀴즈 건너뛰기 모드 ---
 const SKIP_QUIZ = process.env.SKIP_QUIZ === '1' || process.argv.includes('--skip-quiz') || false; // 기본값: false (퀴즈 풀이), SKIP_QUIZ=1으로 설정 시 퀴즈 건너뛰기
 
+// --- 자동 로그인 모드 ---
+const AUTO_LOGIN = process.env.AUTO_LOGIN === '1' || false; // 기본값: false (수동 로그인), AUTO_LOGIN=1으로 설정 시 자동 로그인
+
 // --- 딜레이 설정 (밀리초) ---
 const IS_TEST = process.env.TEST_MODE === '1';
 const DELAY = {
@@ -69,6 +72,7 @@ module.exports = {
   CURRICULUM_URL,
   EXAM_URL,
   SKIP_QUIZ,
+  AUTO_LOGIN,
   DELAY,
   SELECTORS,
 };

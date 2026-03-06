@@ -1,5 +1,5 @@
 const { createCursor } = require('ghost-cursor');
-const { EXAM_URL, DELAY, SELECTORS, SKIP_QUIZ } = require('./config');
+const { EXAM_URL, DELAY, SELECTORS, SKIP_QUIZ, AUTO_LOGIN } = require('./config');
 const { launchBrowser, ensureLoggedIn, randomDelay, randomScroll, humanType, getDynamicDelay } = require('./utils');
 const { searchFlagForWargame } = require('./search');
 const aiProvider = require('./aiProvider');
@@ -44,7 +44,7 @@ async function askTargetRate() {
 }
 
 /**
- * 드림핵 로그인 정보 입력 프롬프트
+ * 드림핵 로그인 정보 입력 프롬프트 (비밀번호 마스킹 지원)
  */
 async function askCredentials() {
   const rl = readline.createInterface({
@@ -54,9 +54,57 @@ async function askCredentials() {
   
   return new Promise((resolve) => {
     rl.question('📧 드림핵 이메일을 입력하세요: ', (email) => {
-      rl.question('🔐 비밀번호를 입력하세요: ', { mask: '*' }, (password) => {
-        rl.close();
-        resolve({ email: email.trim(), password: password.trim() });
+      // TTY가 아닌 경우 (자식 프로세스 등) 간단한 비밀번호 입력 사용
+      if (!process.stdin.isTTY) {
+        rl.question('🔐 비밀번호를 입력하세요: ', (password) => {
+          rl.close();
+          resolve({ email: email.trim(), password: password.trim() });
+        });
+        return;
+      }
+      
+      // TTY인 경우 마스킹 처리
+      const stdin = process.stdin;
+      const stdout = process.stdout;
+      
+      // 원래의 raw 모드 저장
+      const wasRaw = stdin.isRaw;
+      
+      // 비밀번호 입력을 위한 설정
+      stdin.setRawMode(true);
+      stdin.resume();
+      
+      let password = '';
+      stdout.write('🔐 비밀번호를 입력하세요: ');
+      
+      stdin.on('data', function onData(key) {
+        const char = key.toString();
+        
+        // Enter 키 (ASCII 13, \r)
+        if (char === '\r' || char === '\n' || char.charCodeAt(0) === 13) {
+          stdin.removeListener('data', onData);
+          stdin.setRawMode(wasRaw);
+          stdin.pause();
+          stdout.write('\n');
+          rl.close();
+          resolve({ email: email.trim(), password: password.trim() });
+          return;
+        }
+        
+        // Backspace 키 (ASCII 127 또는 8)
+        if (char.charCodeAt(0) === 127 || char.charCodeAt(0) === 8) {
+          if (password.length > 0) {
+            password = password.slice(0, -1);
+            stdout.write('\b \b'); // 커서를 뒤로 이동하고 공백으로 덮은 후 다시 뒤로 이동
+          }
+          return;
+        }
+        
+        // 일반 문자 입력 (32-126 ASCII 범위의 출력 가능 문자)
+        if (char.charCodeAt(0) >= 32 && char.charCodeAt(0) <= 126) {
+          password += char;
+          stdout.write('*');
+        }
       });
     });
   });
@@ -107,18 +155,140 @@ async function getCurrentCompletionRate(page, curriculumUrl) {
 
   try {
     // === 0단계: 로그인 확인 ===
-    await ensureLoggedIn(page, email, password);
+    if (AUTO_LOGIN) {
+      console.log('🤖 자동 로그인 모드 활성화');
+      await ensureLoggedIn(page, email, password);
+    } else {
+      console.log('👤 수동 로그인 모드 활성화');
+      console.log('📢 브라우저가 열렸습니다. 드림핵 로그인 페이지에서 직접 로그인해주세요.');
+      console.log('⏱️ 60초 동안 대기합니다...');
+      
+      // 로그인 페이지로 이동
+      await page.goto('https://dreamhack.io/users/login', { waitUntil: 'networkidle2' });
+      await randomDelay(2000, 4000);
+      
+      // 카운트다운 표시
+      for (let i = 60; i > 0; i--) {
+        if (i % 10 === 0 || i <= 5) {
+          console.log(`⏱️ ${i}초 남았습니다...`);
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // 주기적으로 로그인 상태 확인
+        if (i % 15 === 0) {
+          try {
+            const isLoggedIn = await page.evaluate(() => {
+              const loginSelectors = [
+                '.user-info',
+                '[data-testid="user-menu"]',
+                '.user-menu',
+                '[class*="user"]',
+                '.avatar',
+                '.profile',
+                '.el-dropdown',
+                'img[src*="avatar"]',
+                'button:has(svg)',
+                'header button',
+                '.header-actions button'
+              ];
+              
+              return loginSelectors.some(selector => 
+                document.querySelector(selector) !== null && 
+                document.querySelector(selector).offsetParent !== null
+              );
+            });
+            
+            if (isLoggedIn) {
+              console.log('✅ 로그인 감지됨! 계속 진행합니다.');
+              break;
+            }
+          } catch (err) {
+            // 로그인 확인 중 에러 무시
+          }
+        }
+      }
+      
+      console.log('✅ 로그인 대기 완료. 로그인 상태를 확인합니다...');
+      
+      // 최종 로그인 상태 확인 (강화된 검증)
+      const currentUrl = page.url();
+      console.log('현재 URL:', currentUrl);
+      
+      // URL 기반 기본 확인
+      if (currentUrl.includes('dreamhack.io') && !currentUrl.includes('/login')) {
+        console.log('✅ URL 확인: 로그인 페이지 아님');
+        
+        // 실제 콘텐츠 접근 테스트로 추가 확인
+        try {
+          // 커리큘럼 페이지로 이동하여 실제 콘텐츠 확인
+          const testUrl = 'https://dreamhack.io/euser/curriculums/916';
+          await page.goto(testUrl, { waitUntil: 'networkidle2', timeout: 10000 });
+          await randomDelay(2000, 3000);
+          
+          const hasContent = await page.evaluate(() => {
+            const contentSelectors = [
+              '.entity',
+              '.lecture-item',
+              '.course-item',
+              '.curriculum-item',
+              '.entity-title',
+              '.title',
+              '[class*="item"]',
+              '.action-text'
+            ];
+            
+            return contentSelectors.some(selector => {
+              const elements = document.querySelectorAll(selector);
+              return Array.from(elements).some(el => 
+                el.offsetParent !== null && 
+                el.innerText && 
+                el.innerText.trim().length > 0
+              );
+            });
+          });
+          
+          if (hasContent) {
+            console.log('✅ 로그인 성공 확인 (실제 콘텐츠 확인)');
+          } else {
+            console.log('⚠️ 로그인 상태 불확실 - 콘텐츠를 찾을 수 없습니다.');
+            console.log('⚠️ 로그인이 완료되지 않았을 수 있습니다. 수동으로 확인해주세요.');
+          }
+        } catch (error) {
+          console.log('⚠️ 로그인 상태 확인 중 에러:', error.message);
+          console.log('⚠️ 로그인이 완료되지 않았을 수 있습니다. 수동으로 확인해주세요.');
+        }
+      } else {
+        console.log('⚠️ 로그인이 완료되지 않았을 수 있습니다. 수동으로 확인해주세요.');
+        console.log('⚠️ 현재 로그인 페이지에 머물러 있습니다.');
+      }
+    }
 
     // === 1단계: 커리큘럼에서 미완료 강의 추출 ===
     console.log(`🔍 커리큘럼 페이지 접속: ${CURRICULUM_URL}`);
     await page.goto(CURRICULUM_URL, { waitUntil: 'networkidle2' });
     await randomDelay(2000, 4000);
 
+    // 강의 항목 추출 전 로그인 상태 재확인
+    const currentUrl = page.url();
+    if (currentUrl.includes('/login') || !currentUrl.includes('dreamhack.io')) {
+      console.log('⚠️ 로그인 상태 확인 필요: 현재 로그인 페이지에 있습니다.');
+      console.log('⚠️ 강의 항목을 추출할 수 없습니다. 로그인 후 다시 시도해주세요.');
+      console.log('현재 URL:', currentUrl);
+      return;
+    }
+
     const { lectureUrls, togetherPracticeMap } = await page.evaluate(
       (itemSel, linkSel) => {
         const urls = [];
         const practiceMap = {};
         const items = document.querySelectorAll(itemSel);
+        
+        // 강의 항목이 있는지 확인
+        if (items.length === 0) {
+          console.log('⚠️ 강의 항목을 찾을 수 없습니다. 로그인 상태를 확인해주세요.');
+          return { lectureUrls: [], togetherPracticeMap: {} };
+        }
+        
         items.forEach(item => {
           const titleEl = item.querySelector('.entity-title, .title');
           const title = titleEl ? titleEl.innerText.trim() : '';
@@ -152,8 +322,19 @@ async function getCurrentCompletionRate(page, curriculumUrl) {
     );
 
     if (lectureUrls.length === 0) {
-      console.log('✅ 모든 강의가 이미 완료되었습니다.');
-      return;
+      // 강의 항목이 아예 없는 경우와 모든 강의가 완료된 경우 구분
+      const hasAnyItems = await page.evaluate((itemSel) => {
+        return document.querySelectorAll(itemSel).length > 0;
+      }, SELECTORS.LECTURE_ITEM);
+      
+      if (!hasAnyItems) {
+        console.log('⚠️ 강의 항목을 찾을 수 없습니다. 로그인 상태를 확인해주세요.');
+        console.log('⚠️ 현재 페이지가 커리큘럼 페이지인지 확인해주세요.');
+        return;
+      } else {
+        console.log('✅ 모든 강의가 이미 완료되었습니다.');
+        return;
+      }
     } else {
       console.log(`📚 총 ${lectureUrls.length}개의 미완료 강의를 발견했습니다.`);
     }
