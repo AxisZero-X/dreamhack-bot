@@ -2230,9 +2230,11 @@ async function solveWargameChallenge(browser, page, url, togetherPracticeMap = {
 
     // 이미 해결된 문제인지 확인 (보통 'Clear' 뱃지나 텍스트가 뜸)
     const isSolved = await page.evaluate(() => {
-      return document.body.innerText.includes('이미 해결한 문제입니다') ||
-             document.querySelector('.solved-badge, .is-solved') !== null ||
-             document.body.innerText.includes('Clear');
+      return (
+        document.body.innerText.includes('이미 해결한 문제입니다') ||
+        document.querySelector('.solved-badge, .is-solved') !== null ||
+        document.body.innerText.includes('Clear')
+      );
     });
 
     if (isSolved) {
@@ -2243,7 +2245,8 @@ async function solveWargameChallenge(browser, page, url, togetherPracticeMap = {
     let flag = null;
 
     // === 1단계: [함께실습] 강의에서 플래그 탐색 ===
-    const togetherUrl = togetherPracticeMap[title] ||
+    const togetherUrl =
+      togetherPracticeMap[title] ||
       Object.entries(togetherPracticeMap).find(([k]) => k.includes(title) || title.includes(k))?.[1];
 
     if (togetherUrl) {
@@ -2264,11 +2267,16 @@ async function solveWargameChallenge(browser, page, url, togetherPracticeMap = {
 
           const hasNext = await searchPage.evaluate(() => {
             const btns = Array.from(document.querySelectorAll('button'));
-            const nextBtn = btns.find(b => {
+            const nextBtn = btns.find((b) => {
               const t = b.innerText.trim();
-              return (t === '다음' || t === 'Next' || t.includes('다음')) && !b.disabled && (b.offsetParent !== null);
+              return (
+                (t === '다음' || t === 'Next' || t.includes('다음')) && !b.disabled && b.offsetParent !== null
+              );
             });
-            if (nextBtn) { nextBtn.click(); return true; }
+            if (nextBtn) {
+              nextBtn.click();
+              return true;
+            }
             return false;
           });
 
@@ -2282,25 +2290,27 @@ async function solveWargameChallenge(browser, page, url, togetherPracticeMap = {
         const lectureText = allPageTexts.join('\n\n--- 슬라이드 구분 ---\n\n');
 
         // 직접 DH{...} 패턴 탐색 (단순 케이스: 플레이스홀더/예시가 아닌 실제 플래그)
-        const allMatches = [...lectureText.matchAll(/DH\{[^}]+\}/g)].map(m => m[0]);
+        const allMatches = [...lectureText.matchAll(/DH\{[^}]+\}/g)].map((m) => m[0]);
         // 플레이스홀더 제외: "flag1", "flag2", "...", "여기", "값" 등 추상적 표현 포함된 것
-        const realFlags = allMatches.filter(f =>
-          !f.match(/DH\{flag\d/i) &&   // DH{flag1}, DH{flag2} 등
-          !f.includes('...') &&
-          !f.includes('어쩌구') &&
-          !f.includes('여기') &&
-          f.length > 8                  // DH{ab} 같은 너무 짧은 것 제외
+        const realFlags = allMatches.filter(
+          (f) =>
+            !f.match(/DH\{flag\d/i) && // DH{flag1}, DH{flag2} 등
+            !f.includes('...') &&
+            !f.includes('어쩌구') &&
+            !f.includes('여기') &&
+            f.length > 8, // DH{ab} 같은 너무 짧은 것 제외
         );
+
         if (realFlags.length > 0) {
           flag = realFlags[realFlags.length - 1]; // 마지막(최종) 플래그 사용
           console.log(`🎯 [함께실습] 강의에서 플래그 직접 발견: ${flag}`);
         } else {
-          // AI 분석 요청
+          // AI에게 분석 요청: 플래그 직접 추출 or 힌트 조합 or 이름 기반 추론
           console.log(`🤖 AI에게 [함께실습] 강의 분석 요청 중...`);
           try {
             const wargameProblemText = await page.evaluate(() => document.body.innerText.trim().substring(0, 3000));
             const systemPrompt = "당신은 드림핵(Dreamhack) 워게임 문제 풀이 전문가입니다.";
-            const aiPrompt = `워게임 문제 "[${title}]"의 설명입니다:
+            const aiPrompt = `아래는 워게임 문제 "[${title}]"의 설명입니다:
 ${wargameProblemText.substring(0, 1500)}
 
 아래는 이 문제와 연관된 [함께실습] 강의의 전체 내용입니다:
@@ -2314,15 +2324,12 @@ ${lectureText.substring(0, 6000)}
 응답 형식: 플래그 문자열만 출력 (예: DH{some_flag_here}). 확신이 없으면 "모름"이라고만 출력.`;
 
             const aiAnswer = await aiProvider.getCompletion(aiPrompt, systemPrompt);
-            if (aiAnswer === null) {
-              console.log(`🤖 AI 사용 불가 - 플래그 추론 스킵`);
-            } else {
-              console.log(`🤖 AI 응답: ${aiAnswer}`);
-              const aiFlag = aiAnswer.match(/DH\{[^}]+\}/)?.[0];
-              if (aiFlag) {
-                flag = aiFlag;
-                console.log(`🎯 AI가 플래그를 추론/추출: ${flag}`);
-              }
+            console.log(`🤖 AI 응답: ${aiAnswer}`);
+
+            const aiFlag = aiAnswer.match(/DH\{[^}]+\}/)?.[0];
+            if (aiFlag) {
+              flag = aiFlag;
+              console.log(`🎯 AI가 플래그를 추론/추출: ${flag}`);
             }
           } catch (err) {
             console.log(`⚠️ AI API 호출 실패: ${err.message}`);
@@ -2333,4 +2340,137 @@ ${lectureText.substring(0, 6000)}
       }
     }
 
-    // === 
+    // === 2단계: 웹 검색을 통한 플래그 획득 시도 ===
+    if (!flag) {
+      console.log(`🔍 검색용 새 탭을 엽니다...`);
+      const searchPage = await browser.newPage();
+      flag = await searchFlagForWargame(searchPage, title);
+      await searchPage.close();
+      console.log(`🔍 검색용 새 탭을 닫았습니다.`);
+    }
+
+    // === 3단계: AI에게 문제 설명만으로 최후 추론 요청 ===
+    if (!flag) {
+      try {
+        console.log(`🤖 AI에게 문제 설명 기반 추론 요청 중...`);
+        await page.bringToFront();
+        const problemText = await page.evaluate(() => document.body.innerText.trim().substring(0, 3000));
+        const aiPrompt = `드림핵 워게임 문제 "[${title}]"입니다. 문제 설명:
+${problemText}
+
+이 문제의 DH{...} 형식 플래그를 추론해주세요. 확신이 없으면 "모름"이라고만 출력.`;
+
+        const aiAnswer = await aiProvider.getCompletion(aiPrompt);
+        const aiFlag = aiAnswer.match(/DH\{[^}]+\}/)?.[0];
+        if (aiFlag) {
+          flag = aiFlag;
+          console.log(`🤖 AI 최후 추론 플래그: ${flag}`);
+        }
+      } catch (err) {
+        console.log(`⚠️ AI 최후 추론 실패: ${err.message}`);
+      }
+    }
+
+    // 브라우저 포커스를 다시 기존 페이지로
+    await page.bringToFront();
+    await randomDelay(1500, 3000);
+
+    if (flag) {
+      console.log(`🔑 워게임 [${title}] 에 플래그 입력 시도: ${flag}`);
+
+      // 플래그 입력 필드 찾아서 입력
+      const inputExists = await page.evaluate((f) => {
+        const inputs = Array.from(document.querySelectorAll('input[type="text"]'));
+        const targetInput =
+          inputs.find(
+            (i) =>
+              i.placeholder.includes('플래그') ||
+              i.placeholder.includes('DH{') ||
+              i.placeholder.includes('flag') ||
+              i.className.includes('flag'),
+          ) || inputs[0];
+
+        if (targetInput) {
+          targetInput.value = f;
+          targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+          targetInput.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+        }
+        return false;
+      }, flag);
+
+      if (inputExists) {
+        await randomDelay(500, 1000);
+
+        // 제출 버튼 클릭
+        await page.evaluate(() => {
+          const btns = Array.from(document.querySelectorAll('button'));
+          const submitBtn = btns.find(
+            (b) => b.innerText.includes('제출') || b.innerText.includes('인증') || b.innerText.includes('Submit'),
+          );
+          if (submitBtn) {
+            submitBtn.click();
+          }
+        });
+
+        await randomDelay(2000, 4000);
+
+        // 제출 후 모달/메시지 확인 - 개선된 버전
+        const result = await page.evaluate(() => {
+          const text = document.body.innerText;
+          
+          // 1. 먼저 메시지 분석 (모달 닫기 전에)
+          const successKeywords = ['정답입니다', 'Correct', '축하합니다', '성공', '통과', '맞췄습니다'];
+          const failureKeywords = ['아쉽게도 틀렸습니다', '틀렸', '오답', 'Incorrect', 'Wrong', '실패', 'Failed'];
+          
+          let isSuccess = false;
+          let isFailure = false;
+          
+          // 텍스트 기반 판단
+          for (const keyword of successKeywords) {
+            if (text.includes(keyword)) {
+              isSuccess = true;
+              break;
+            }
+          }
+          
+          for (const keyword of failureKeywords) {
+            if (text.includes(keyword)) {
+              isFailure = true;
+              break;
+            }
+          }
+          
+          // 2. 시각적 요소 확인 (클래스, 아이콘 등)
+          const successElements = document.querySelectorAll('.is-success, .is-correct, .check-icon, .success-icon');
+          const failureElements = document.querySelectorAll('.is-wrong, .is-incorrect, .is-error, .wrong-icon');
+          
+          if (successElements.length > 0) isSuccess = true;
+          if (failureElements.length > 0) isFailure = true;
+          
+          // 3. 모달 닫기 버튼 클릭 (있으면)
+          const alertBtn = document.querySelector('.el-message-box__btns .el-button--primary, .el-message-box__btns .btn-primary');
+          if (alertBtn) {
+            alertBtn.click();
+          }
+          
+          return { isSuccess, isFailure };
+        });
+
+        if (result.isSuccess) {
+          console.log(`🎉 워게임 [${title}] 정답 처리됨!`);
+        } else if (result.isFailure) {
+          console.log(`❌ 워게임 [${title}] 플래그 제출 실패(오답이거나 이미 풀었음). 넘어갑니다.`);
+        } else {
+          console.log(`⚠️ 워게임 [${title}] 제출 결과를 확인할 수 없습니다.`);
+        }
+      } else {
+        console.log('⚠️ 플래그 입력 칸을 찾지 못했습니다.');
+      }
+    } else {
+      console.log(`⚠️ 워게임 [${title}] 플래그를 찾지 못해 건너뜁니다.`);
+    }
+  } catch (err) {
+    console.log(`⚠️ 워게임 처리 중 에러: ${err.message}`);
+  }
+}
