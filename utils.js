@@ -99,6 +99,9 @@ function getDynamicDelay(base, multiplier = 1) {
 /**
  * 페이지에서 난이도 정보 추출 및 딜레이 계산
  */
+/**
+ * 페이지에서 난이도 정보 추출 및 딜레이 계산
+ */
 async function getDynamicDelayFromPage(page) {
   try {
     // 페이지에서 난이도 정보 추출 (텍스트 길이 기반)
@@ -117,49 +120,56 @@ async function getDynamicDelayFromPage(page) {
     // config.js의 DELAY를 불러와 기본값으로 활용
     const { DELAY } = require('./config');
 
-    // 기본 범위 (config.js 설정 기준)
-    let minDelay = DELAY.PAGE_STAY_MIN || 30000;
-    let maxDelay = DELAY.PAGE_STAY_MAX || 180000;
-
     // 테스트 모드인 경우
-    if (minDelay < 5000) {
-      return { level: 'test', min: minDelay, max: maxDelay };
+    if (DELAY.PAGE_STAY_MIN && DELAY.PAGE_STAY_MIN < 5000) {
+      return { level: 'test', min: DELAY.PAGE_STAY_MIN, max: DELAY.PAGE_STAY_MAX };
     }
 
     let difficulty = 'medium';
+    let minDelay, maxDelay;
 
-    // 텍스트 길이에 따른 동적 스케일링
+    // 인간의 평균 독해 속도를 분당 600자 (초당 10자)로 설정하여 계산
+    // minDelay는 빠른 스키밍 속도 (800자/분)를 기준으로
+    // maxDelay는 꼼꼼한 독해 속도 (400자/분)에 약간의 여유를 둔 기준으로 산정
+    const charsPerMinFast = 800; // 스키밍 (빠르게 훑기)
+    const charsPerMinSlow = 400; // 꼼꼼한 독해
+
     if (wordCount < 500) {
-      // 500자 미만 (매우 짧음): 10초 ~ 20초
+      // 500자 미만 (매우 짧음): 정상 속도로 읽으면 약 30~50초 소요
+      // 아주 짧은 안내 문구 가능성을 고려하여 최솟값을 낮게 잡음
       difficulty = 'very_easy';
-      minDelay = 10000;
-      maxDelay = 20000;
+      minDelay = Math.max(15000, Math.floor((wordCount / charsPerMinFast) * 60000));
+      maxDelay = Math.max(30000, Math.floor((wordCount / charsPerMinSlow) * 60000) + 15000);
     } else if (wordCount < 1500) {
-      // 1500자 미만 (짧음): 15초 ~ 35초
+      // 1500자 미만 (짧음): 0.5분 ~ 1분 권장
       difficulty = 'easy';
-      minDelay = 15000;
-      maxDelay = 35000;
+      minDelay = Math.floor((wordCount / charsPerMinFast) * 60000);
+      maxDelay = Math.floor((wordCount / charsPerMinSlow) * 60000) + 30000;
+      minDelay = Math.max(minDelay, 30000); // 최소 30초 대기
     } else if (wordCount < 4000) {
-      // 4000자 미만 (보통): 30초 ~ 70초
+      // 4000자 미만 (보통): 1분 ~ 2분 이상 권장
       difficulty = 'medium';
-      minDelay = 30000;
-      maxDelay = 70000;
+      minDelay = Math.floor((wordCount / charsPerMinFast) * 60000);
+      maxDelay = Math.floor((wordCount / charsPerMinSlow) * 60000) + 60000;
+      minDelay = Math.max(minDelay, 60000); // 최소 1분 대기
     } else if (wordCount < 8000) {
-      // 8000자 미만 (긺): 60초 ~ 120초
+      // 8000자 미만 (긺): 2분 ~ 4분 이상 권장
       difficulty = 'hard';
-      minDelay = 60000;
-      maxDelay = 120000;
+      minDelay = Math.floor((wordCount / charsPerMinFast) * 60000);
+      maxDelay = Math.floor((wordCount / charsPerMinSlow) * 60000) + 120000;
+      minDelay = Math.max(minDelay, 120000); // 최소 2분 대기
     } else {
-      // 8000자 이상 (매우 긺): 90초 ~ 180초
+      // 8000자 이상 (매우 긺): 4분 이상 소요됨
       difficulty = 'very_hard';
-      minDelay = 90000;
-      maxDelay = 180000;
+      minDelay = Math.floor((wordCount / charsPerMinFast) * 60000);
+      maxDelay = Math.floor((wordCount / charsPerMinSlow) * 60000) + 180000;
+      minDelay = Math.max(minDelay, 180000); // 최소 3분 대기
     }
 
-    // 비디오가 있는 경우 시청 시간 고려해 추가 딜레이 (최소 60초 추가, 최대 180초 추가)
+    // 비디오가 있는 경우 시청 시간 고려해 추가 딜레이 (최소 3분 추가, 최대 제한 없음)
     if (hasVideo) {
-      minDelay = Math.max(minDelay, 60000); // 비디오가 있으면 최소 1분 시청
-      maxDelay = Math.max(maxDelay + 30000, 180000); // 최대 시간도 늘림 (최대 3분 이상)
+      minDelay = Math.max(minDelay, 180000); // 비디오가 있으면 최소 3분 시청
+      maxDelay = maxDelay + 300000; // 최대 시간에 5분 추가 
       difficulty += '_video';
     }
 
@@ -172,8 +182,8 @@ async function getDynamicDelayFromPage(page) {
     // 에러 발생 시 기본값 반환
     return {
       level: 'medium',
-      min: 30000,
-      max: 60000
+      min: 60000,
+      max: 120000
     };
   }
 }
